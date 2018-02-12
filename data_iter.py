@@ -22,8 +22,8 @@ class DataIter(Dataset):
         self.coco_kps = coco
         self.NUM_PARTS=18
         self.NUM_LINKS=19
-        self.HEAT_RADIUS = 32
-        self.PART_LINE_WIDTH=32
+        self.HEAT_RADIUS = 8
+        self.PART_LINE_WIDTH=16
     def __len__(self):
         return len(self.imgIds)
     def __getitem__(self,index):
@@ -121,7 +121,8 @@ class DataIter(Dataset):
         pafmaps[np.where(pafmaps_count!=0)] /= pafmaps_count[np.where(pafmaps_count!=0)]
         heatmaps = np.array(heatmaps)
         # heatmaps = np.concatenate([heatmaps,np.max(heatmaps,axis = 0)[np.newaxis,:,:],img_human_seg[np.newaxis,:,:]])
-        heatmaps = np.concatenate([heatmaps,img_human_seg[np.newaxis]])
+        # heatmaps = np.concatenate([heatmaps,img_human_seg[np.newaxis]])
+        heatmaps = np.concatenate([heatmaps,np.min(heatmaps,axis=0)[np.newaxis]])
         loss_mask = loss_mask[np.newaxis,:,:]
         
         img_ori,heatmaps,pafmaps,loss_mask = self.im_transpose(img_ori, heatmaps, pafmaps, loss_mask, axes=(1,2,0))
@@ -129,7 +130,7 @@ class DataIter(Dataset):
         img_ori,heatmaps,pafmaps,loss_mask = self.im_crop(img_ori, heatmaps, pafmaps, loss_mask)
         
         dest_size = (46,46)
-        heatmaps = cv2.resize(heatmaps,dest_size)
+        heatmaps = cv2.resize(heatmaps,dest_size,interpolation=cv2.INTER_NEAREST)
 #         heatmaps = cv2.GaussianBlur(heatmaps,(3,3),1)
         pafmaps = cv2.resize(pafmaps,dest_size)
         loss_mask = cv2.resize(loss_mask,dest_size)
@@ -213,14 +214,13 @@ def getDataLoader(batch_size = 16):
     r = DataLoader(test_iter, batch_size=batch_size, shuffle=True, num_workers=5, collate_fn=collate_fn, pin_memory=False,drop_last = True)
     return r
 if __name__ == '__main__':
-    print("length",len(getDataLoader()))
+    print("length",len(getDataLoader(8)))
     data_iter = DataIter()
     for i in range(len(data_iter)):
         da = data_iter[i]
         for d in da:
             print(d.shape)
-        draw_heatmap(da[1])
-        plt.show()
+
         x = list(map(lambda x: np.transpose(x,(1,2,0)) if len(x.shape) > 2 else x, da))
         
         fig, axes = plt.subplots(2, len(x)//2 + len(x)%2, figsize=(45, 45),

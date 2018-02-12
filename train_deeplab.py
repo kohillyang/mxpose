@@ -24,6 +24,7 @@ def load_checkpoint(prefix, epoch):
     save_dict = mx.nd.load('%s-%04d.params' % (prefix, epoch))
     arg_params = {}
     aux_params = {}
+
     for k, v in save_dict.items():
         tp, name = k.split(':', 1)
         if tp == 'arg':
@@ -49,7 +50,7 @@ def train(retrain = True,ndata = 16,gpus = [0,1],start_n_dataset = 0):
         ('loss_mask', (batch_size, 1, 46, 46)),])
     summary_writer = SummaryWriter(LOGGING_DIR)
     if retrain:
-        args,auxes = {},{}
+        args,auxes = load_checkpoint("pre/rcnn_coco",0)
     else:
         args,auxes = load_checkpoint(SAVE_PREFIX+"final",start_n_dataset)
         

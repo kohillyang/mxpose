@@ -6,3 +6,7 @@ logs/
 *.pyc
 
 models/
+
+*.params
+
+*.json

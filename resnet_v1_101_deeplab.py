@@ -1097,13 +1097,14 @@ class resnet_v1_101_deeplab():
             loss2 = mx.sym.broadcast_mul(((paf_p - partaffinityglabel) ** 2), loss_mask)
             # loss1 = mx.sym.broadcast_mul(((heat_p - heatmaplabel) ** 2), loss_mask)
 
-            loss1 = mx.sym.sum(loss1) / (19 * 46 * 46)
+            loss1 = mx.sym.sum(loss1 / (19 * 46 * 46 ))
             loss2 = mx.sym.sum(loss2 / (19 * 46 * 46 * 2))
 
             return mx.symbol.Group([mx.symbol.MakeLoss(loss1), mx.symbol.MakeLoss(loss2)])
 
         else:
-            return mx.sym.Group([Mconv7_stage6_L2,Mconv7_stage6_L1,])
+            heat_p = mx.symbol.sigmoid(heat_p)
+            return mx.sym.Group([paf_p,heat_p])
         # return r0,r1
 def slice_label(sym,numberofparts,numberoflinks):
     slice_symbol = lambda s,e:mx.symbol.slice_axis(sym,axis = 1,begin = s,end = s+e if e is not None else None)
