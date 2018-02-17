@@ -43,6 +43,8 @@ class DataIter(Dataset):
         assert 'segmentation' in anns[0] or 'keypoints' in anns[0]
         polygons = []
         color = []
+        keypoints = [] #(part_id,x,y)
+        parts = []#((partid0,x0,y0),(partid1,x1,y1))
         for ann in anns:
             c = (np.random.random((1, 3))*0.6+0.4).tolist()[0]
             if 'segmentation' in ann:
@@ -93,28 +95,49 @@ class DataIter(Dataset):
                     v.append(min(v_coco[index1],v_coco[index2]))
                 for i in range(self.NUM_PARTS):
                     if v[i] > 0:
-                        cv2.circle(heatmaps[i],(int(round(x[i])),int(round(y[i]))),self.HEAT_RADIUS,(1,1,1),-1)
+                        # cv2.circle(heatmaps[i],(int(round(x[i])),int(round(y[i]))),self.HEAT_RADIUS,(1,1,1),-1)
+                        keypoints.append([i,x[i],y[i]])
                 for i in range(self.NUM_LINKS):
                     kp0,kp1 = mid_1[i]-1,mid_2[i]-1
                     if v[kp0] > 0 and v[kp1] > 0:
-                        p0 = np.array([x[kp0],y[kp0]])
-                        p1 = np.array([x[kp1],y[kp1]])  
-                        mask_ = np.zeros_like(loss_mask,dtype = np.uint8)
-                        cv2.line(mask_,(int(round(x[kp0])),int(round(y[kp0]))),
-                                 (int(round(x[kp1])),int(round(y[kp1]))),(1,1,1),self.PART_LINE_WIDTH)
-                        vec = p1 -p0
-                        vec =  vec/(np.linalg.norm(vec)+0.001)                 
-                        vec_index = np.where(mask_)
-                        pafmaps[2*i][vec_index] += vec[0]
-                        pafmaps[2*i + 1][vec_index] += vec[1]
-                        pafmaps_count[2*i][vec_index] += 1
-                        pafmaps_count[2*i+1][vec_index] += 1
+                        parts.append([i,x[kp0],y[kp0],x[kp1],y[kp1]])
+                        # p0 = np.array([x[kp0],y[kp0]])
+                        # p1 = np.array([x[kp1],y[kp1]])
+                        # mask_ = np.zeros_like(loss_mask,dtype = np.uint8)
+                        # cv2.line(mask_,(int(round(x[kp0])),int(round(y[kp0]))),
+                        #          (int(round(x[kp1])),int(round(y[kp1]))),(1,1,1),self.PART_LINE_WIDTH)
+                        # vec = p1 -p0
+                        # vec =  vec/(np.linalg.norm(vec)+0.001)
+                        # vec_index = np.where(mask_)
+                        # pafmaps[2*i][vec_index] += vec[0]
+                        # pafmaps[2*i + 1][vec_index] += vec[1]
+                        # pafmaps_count[2*i][vec_index] += 1
+                        # pafmaps_count[2*i+1][vec_index] += 1
 
         if len(img_ori.shape) == 2:
             temp = np.empty(shape= (img_ori.shape[0],img_ori.shape[1],3),dtype = np.uint8)
             for i in range(3):
                 temp[:,:,i] = img_ori 
             print('gray img')           
+
+
+        for pard_id,x,y in keypoints:
+            cv2.circle(heatmaps[pard_id],
+                       (int(round(x)),int(round(y))),self.HEAT_RADIUS,(1,1,1),-1)
+        for limb_id,x0,y0,x1,y1 in parts:
+            p0 = np.array([x0,y0])
+            p1 = np.array([x1,y1])
+            mask_ = np.zeros_like(loss_mask,dtype = np.uint8)
+            cv2.line(mask_,(int(round(x0)),int(round(y0))),
+                     (int(round(x1)),int(round(y1))),(1,1,1),self.PART_LINE_WIDTH)
+            vec = p1 -p0
+            vec =  vec/(np.linalg.norm(vec)+0.001)
+            vec_index = np.where(mask_)
+            pafmaps[2*limb_id][vec_index] += vec[0]
+            pafmaps[2*limb_id + 1][vec_index] += vec[1]
+            pafmaps_count[2*limb_id][vec_index] += 1
+            pafmaps_count[2*limb_id+1][vec_index] += 1
+
         img_ori = np.transpose(img_ori,(2,0,1))
         pafmaps_count = np.array(pafmaps_count)
         pafmaps = np.array(pafmaps)
@@ -130,7 +153,7 @@ class DataIter(Dataset):
         img_ori,heatmaps,pafmaps,loss_mask = self.im_crop(img_ori, heatmaps, pafmaps, loss_mask)
         
         dest_size = (46,46)
-        heatmaps = cv2.resize(heatmaps,dest_size,interpolation=cv2.INTER_NEAREST)
+        heatmaps = cv2.resize(heatmaps,dest_size,interpolation=cv2.INTER_CUBIC)
 #         heatmaps = cv2.GaussianBlur(heatmaps,(3,3),1)
         pafmaps = cv2.resize(pafmaps,dest_size)
         loss_mask = cv2.resize(loss_mask,dest_size)
