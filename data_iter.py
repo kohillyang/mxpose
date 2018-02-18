@@ -22,7 +22,7 @@ class DataIter(Dataset):
         self.coco_kps = coco
         self.NUM_PARTS=18
         self.NUM_LINKS=19
-        self.HEAT_RADIUS = 8
+        self.HEAT_RADIUS = 12
         self.PART_LINE_WIDTH=16
     def __len__(self):
         return len(self.imgIds)
@@ -31,9 +31,6 @@ class DataIter(Dataset):
         img_ori = cv2.imread(os.path.join(self.trainimagepath , img['file_name']))
         img_human_seg = np.zeros(shape = img_ori.shape[0:2],dtype=np.float32)
         loss_mask = np.ones_like(img_human_seg)
-        heatmaps = [np.zeros_like(loss_mask) for _ in range(self.NUM_PARTS)]
-        pafmaps  = [np.zeros_like(loss_mask) for _ in range(self.NUM_LINKS * 2)]   
-        pafmaps_count = [np.zeros_like(loss_mask) for _ in range(self.NUM_LINKS * 2)]       
         annIds = self.coco_kps.getAnnIds(imgIds=img['id'], catIds=self.catIds, iscrowd=None)
         anns = self.coco_kps.loadAnns(annIds)
 #         plt.imshow(img_ori)
@@ -101,19 +98,6 @@ class DataIter(Dataset):
                     kp0,kp1 = mid_1[i]-1,mid_2[i]-1
                     if v[kp0] > 0 and v[kp1] > 0:
                         parts.append([i,x[kp0],y[kp0],x[kp1],y[kp1]])
-                        # p0 = np.array([x[kp0],y[kp0]])
-                        # p1 = np.array([x[kp1],y[kp1]])
-                        # mask_ = np.zeros_like(loss_mask,dtype = np.uint8)
-                        # cv2.line(mask_,(int(round(x[kp0])),int(round(y[kp0]))),
-                        #          (int(round(x[kp1])),int(round(y[kp1]))),(1,1,1),self.PART_LINE_WIDTH)
-                        # vec = p1 -p0
-                        # vec =  vec/(np.linalg.norm(vec)+0.001)
-                        # vec_index = np.where(mask_)
-                        # pafmaps[2*i][vec_index] += vec[0]
-                        # pafmaps[2*i + 1][vec_index] += vec[1]
-                        # pafmaps_count[2*i][vec_index] += 1
-                        # pafmaps_count[2*i+1][vec_index] += 1
-
         if len(img_ori.shape) == 2:
             temp = np.empty(shape= (img_ori.shape[0],img_ori.shape[1],3),dtype = np.uint8)
             for i in range(3):
@@ -121,66 +105,99 @@ class DataIter(Dataset):
             print('gray img')           
 
 
-        for pard_id,x,y in keypoints:
-            cv2.circle(heatmaps[pard_id],
-                       (int(round(x)),int(round(y))),self.HEAT_RADIUS,(1,1,1),-1)
+        from img_aug import im_aug
+        [img_ori,loss_mask],keypoints,parts = im_aug([img_ori,loss_mask],keypoints,parts)
+        # for pard_id,x,y in keypoints:
+        #     cv2.circle(heatmaps[pard_id],
+        #                (int(round(x)),int(round(y))),self.HEAT_RADIUS,(1,1,1),-1)
+        #
+
+        img_ori = np.transpose(img_ori,(2,0,1))
+        # heatmaps = np.array(heatmaps)
+
+        # heatmaps = np.concatenate([heatmaps,np.max(heatmaps,axis = 0)[np.newaxis,:,:],img_human_seg[np.newaxis,:,:]])
+        # heatmaps = np.concatenate([heatmaps,img_human_seg[np.newaxis]])
+        # heatmaps = np.concatenate([heatmaps,np.min(heatmaps,axis=0)[np.newaxis]])
+        loss_mask = loss_mask[np.newaxis,:,:]
+        
+        img_ori,loss_mask = self.im_transpose([img_ori, loss_mask], axes=(1,2,0))
+        img_ori,keypoints,parts,loss_mask = self.im_resize(img_ori, keypoints, parts, loss_mask)
+        # img_ori,heatmaps,pafmaps,loss_mask = self.im_crop(img_ori, heatmaps, pafmaps, loss_mask)
+        stride = 8.0
+        heatmaps = [np.zeros(shape = (46,46),dtype=np.float32) for _ in range(self.NUM_PARTS)]
+        # pafmaps = [np.zeros(shape = (46,46),dtype=np.float32) for _ in range(self.NUM_LINKS*2)]
+
+        for m in range(int(368//stride)):
+            for n in range(int(368//stride)):
+                ori_x = n *stride + stride / 2 - 0.5
+                ori_y = m * stride + stride / 2 - 0.5
+                for  pard_id,x,y in keypoints:
+                    d2 = (ori_x-x)**2+(ori_y-y)**2
+                    thgma  = 7.0
+                    exponent = d2 / 2.0 / (thgma**2)
+                    heatmaps[pard_id][m, n] = max(np.exp(-exponent), heatmaps[pard_id][m,n])
+        # for limb_id,x0,y0,x1,y1 in parts:
+        #     vec = np.array([x0,y0])-np.array([x1,y1])
+        #     vec /= np.linalg.norm(vec) + 0.0001
+        #     mask_ = np.zeros_like(loss_mask,dtype = np.uint8)
+        #     cv2.line(mask_,(int(round(x0)),int(round(y0))),
+        #              (int(round(x1)),int(round(y1))),(1,1,1),self.PART_LINE_WIDTH)
+        #     pafmaps[limb_id *2] = np.squeeze( mask_[::int(stride),::int(stride)]) * vec[0]
+        #     pafmaps[limb_id *2 + 1] = np.squeeze( mask_[::int(stride),::int(stride)]) * vec[1]
+        pafmaps  = [np.zeros_like(np.squeeze(loss_mask)) for _ in range(self.NUM_LINKS * 2)]
+        pafmaps_count = [np.zeros_like(np.squeeze(loss_mask)) for _ in range(self.NUM_LINKS * 2)]
+
         for limb_id,x0,y0,x1,y1 in parts:
             p0 = np.array([x0,y0])
             p1 = np.array([x1,y1])
-            mask_ = np.zeros_like(loss_mask,dtype = np.uint8)
+            mask_ = np.zeros_like(np.squeeze(loss_mask),dtype = np.uint8)
             cv2.line(mask_,(int(round(x0)),int(round(y0))),
                      (int(round(x1)),int(round(y1))),(1,1,1),self.PART_LINE_WIDTH)
             vec = p1 -p0
             vec =  vec/(np.linalg.norm(vec)+0.001)
-            vec_index = np.where(mask_)
+            vec_index = np.where(np.squeeze(mask_) )
             pafmaps[2*limb_id][vec_index] += vec[0]
             pafmaps[2*limb_id + 1][vec_index] += vec[1]
             pafmaps_count[2*limb_id][vec_index] += 1
             pafmaps_count[2*limb_id+1][vec_index] += 1
 
-        img_ori = np.transpose(img_ori,(2,0,1))
         pafmaps_count = np.array(pafmaps_count)
         pafmaps = np.array(pafmaps)
         pafmaps[np.where(pafmaps_count!=0)] /= pafmaps_count[np.where(pafmaps_count!=0)]
+        pafmaps = pafmaps[:,::int(stride),::int(stride)]
         heatmaps = np.array(heatmaps)
-        # heatmaps = np.concatenate([heatmaps,np.max(heatmaps,axis = 0)[np.newaxis,:,:],img_human_seg[np.newaxis,:,:]])
-        # heatmaps = np.concatenate([heatmaps,img_human_seg[np.newaxis]])
         heatmaps = np.concatenate([heatmaps,np.min(heatmaps,axis=0)[np.newaxis]])
-        loss_mask = loss_mask[np.newaxis,:,:]
-        
-        img_ori,heatmaps,pafmaps,loss_mask = self.im_transpose(img_ori, heatmaps, pafmaps, loss_mask, axes=(1,2,0))
-        img_ori,heatmaps,pafmaps,loss_mask = self.im_resize(img_ori, heatmaps, pafmaps, loss_mask)
-        img_ori,heatmaps,pafmaps,loss_mask = self.im_crop(img_ori, heatmaps, pafmaps, loss_mask)
-        
         dest_size = (46,46)
-        heatmaps = cv2.resize(heatmaps,dest_size,interpolation=cv2.INTER_CUBIC)
+        # heatmaps = cv2.resize(heatmaps,dest_size,interpolation=cv2.INTER_CUBIC)
 #         heatmaps = cv2.GaussianBlur(heatmaps,(3,3),1)
-        pafmaps = cv2.resize(pafmaps,dest_size)
+#         pafmaps = cv2.resize(pafmaps,dest_size)
         loss_mask = cv2.resize(loss_mask,dest_size)
         loss_mask = loss_mask[:,:,np.newaxis]
-        img_ori,heatmaps,pafmaps,loss_mask = self.im_transpose(img_ori, heatmaps, pafmaps, loss_mask, axes=(2,0,1))      
+        img_ori,loss_mask = self.im_transpose([img_ori, loss_mask], axes=(2,0,1))
 
         loss_mask = np.min(loss_mask,axis = 0)[np.newaxis,:,:]
 
-        heatmaps[np.where(heatmaps>=0.999)] = 0.999
+        # heatmaps[np.where(heatmaps>=0.1)] = 0.999
         heatmaps[np.where(heatmaps<0)] = 0
+        loss_mask[np.where(loss_mask < 0.5)] = 0
         # print("res",loss_mask.shape)
+        # print("pafmap.shape",pafmaps.shape)
         return img_ori,heatmaps,pafmaps,loss_mask
-    def im_transpose(self,img_ori,heatmaps,pafmaps,loss_mask,axes = (2,1,0)):
-        img_ori,heatmaps,pafmaps,loss_mask = list(
-            map(lambda x:np.transpose(x,axes=axes),
-                [img_ori,heatmaps,pafmaps,loss_mask]))
-      
-        return img_ori,heatmaps,pafmaps,loss_mask
+
+    def im_transpose(self,imgs,axes = (2,1,0)):
+        imgs_r = []
+        for img in  imgs:
+            imgs_r.append(np.transpose(img,axes=axes))
+        return imgs_r
         
-    def im_resize(self,img_ori,heatmaps,pafmaps,loss_mask):
+    def im_resize(self,img_ori,keypoints,parts,loss_mask):
         fscale = 368.0/np.max(img_ori.shape[0:2])
         
-        img_ori,heatmaps,pafmaps,loss_mask = list(
+        img_ori,loss_mask = list(
             map(lambda x:cv2.resize(x,(
                 int(np.round(fscale*img_ori.shape[1])),int(np.round(fscale*img_ori.shape[0])))
                 ),
-                [img_ori,heatmaps,pafmaps,loss_mask]))
+                [img_ori,loss_mask]))
         loss_mask = loss_mask[:,:,np.newaxis]
         def img_pad(x):
             sm = np.max(x.shape[0:2])
@@ -188,10 +205,15 @@ class DataIter(Dataset):
             padded[:x.shape[0],:x.shape[1]] = x
             return padded
         img_ori_padded = img_pad(img_ori)
-        heatmaps_padded = img_pad(heatmaps)
-        pafmaps_padded = img_pad(pafmaps)
+        # heatmaps_padded = img_pad(heatmaps)
         loss_mask_padded = img_pad(loss_mask)
-        return img_ori_padded,heatmaps_padded,pafmaps_padded,loss_mask_padded
+        keypoints_r = []
+        for part_id,x,y in keypoints:
+            keypoints_r.append([part_id,x*fscale,y*fscale])
+        parts_r = []
+        for limb_id,x0,y0,x1,y1 in parts:
+            parts_r.append([limb_id,x0*fscale,y0*fscale,x1* fscale,y1*fscale])
+        return img_ori_padded,keypoints_r,parts_r,loss_mask_padded
     def im_crop(self,img_ori,heatmaps,pafmaps,loss_mask):
         start_m = random.randint(0,img_ori.shape[0]-368)
         start_n = random.randint(0,img_ori.shape[1]-368)
@@ -262,13 +284,14 @@ if __name__ == '__main__':
                 print(count,len(x))
                 if len(img.shape)>2 and img.shape[2]==38:
                     img = np.array([np.sqrt(img[:,:,k *2] ** 2 + img[:,:,k *2+1 ] ** 2) for k in range(img.shape[2]//2)])
-                    axes[j][i].imshow(np.max(img,axis = 0)) 
+                    axes[j][i].imshow(np.max(img,axis = 0))
+                    print("limb")
                 elif len(img.shape)>2 and img.shape[2] > 3:
                     axes[j][i].imshow(np.max(img[:,:,:-1],axis = 2)) 
                 elif len(img.shape)>2 and img.shape[2] == 1:
                     axes[j][i].imshow(img[:,:,0]) 
                 else:
-                    axes[j][i].imshow(img) 
+                    axes[j][i].imshow(img.astype(np.uint8))
                      
         plt.show()
     pass

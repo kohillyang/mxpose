@@ -121,7 +121,7 @@ def applyDNN(oriImg, images, sym1, arg_params1, aux_params1):
     # print 'forward'
     result = cmodel.get_outputs()
 
-    heatmap = np.moveaxis(result[1].asnumpy()[0], 0, -1)
+    heatmap = np.moveaxis(result[0].asnumpy()[0], 0, -1)
     heatmap = cv.resize(heatmap, (0, 0), fx=8, fy=8, interpolation=cv.INTER_CUBIC)  # INTER_LINEAR
     heatmap = heatmap[:imageToTest_padded.shape[0] - pad[2], :imageToTest_padded.shape[1] - pad[3], :]
     heatmap = cv.resize(heatmap, (oriImg.shape[1], oriImg.shape[0]), interpolation=cv.INTER_CUBIC)
@@ -130,7 +130,7 @@ def applyDNN(oriImg, images, sym1, arg_params1, aux_params1):
     # plt.imshow(np.max(heatmap[:,:,:-1],axis=2))
     # #
     # plt.show()
-    pagmap = np.moveaxis(result[0].asnumpy()[0], 0, -1)
+    pagmap = np.moveaxis(result[1].asnumpy()[0], 0, -1)
     pagmap = cv.resize(pagmap, (0, 0), fx=8, fy=8, interpolation=cv.INTER_CUBIC)
     pagmap = pagmap[:imageToTest_padded.shape[0] - pad[2], :imageToTest_padded.shape[1] - pad[3], :]
     pagmap = cv.resize(pagmap, (oriImg.shape[1], oriImg.shape[0]), interpolation=cv.INTER_CUBIC)
@@ -284,7 +284,7 @@ def connect56LineVec(oriImg, param, sym, arg_params, aux_params):
                         # print(score_midpts)
                         # print('score_midpts: ', score_midpts)
                         score_with_dist_prior = sum(score_midpts) / len(score_midpts) + min(
-                            0.5 * oriImg.shape[0] / norm - 1, 0)
+                            0.5 * oriImg.shape[0] / (norm + 0.001) - 1, 0)
 
                         # print('score_with_dist_prior: ', score_with_dist_prior)
                         criterion1 = len(np.nonzero(score_midpts > param['thre2'])[0]) > 0.8 * len(score_midpts)
@@ -392,7 +392,7 @@ sym = get_symbol(is_train=False, numberofparts=19, numberoflinks=19)
 from train_deeplab import SAVE_PREFIX
 import sys
 
-_, arg_params, aux_params = mx.model.load_checkpoint(SAVE_PREFIX + "final", 2)
+_, arg_params, aux_params = mx.model.load_checkpoint(SAVE_PREFIX + "final", 13)
 
 # ground truth
 annFile = '/home/kohill/hszc/data/coco/annotations/person_keypoints_val2014.json'
