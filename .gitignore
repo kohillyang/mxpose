@@ -10,3 +10,9 @@ models/
 *.params
 
 *.json
+
+\.pydevproject
+
+\.cproject
+
+\.project
