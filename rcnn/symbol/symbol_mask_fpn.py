@@ -323,13 +323,13 @@ def get_resnet_fpn_rpn(numberofparts,numberoflinks):
     heatmapweight = mx.symbol.Variable(name = "heatmapweight")
     pafmapweight = mx.symbol.Variable(name = "pafmapweight")
 
-    weight_sum_pos = mx.symbol.sum((heatmaplabel>=0.5)*heatmapweight)
-    weight_sum_neg = mx.symbol.sum((heatmaplabel<0.5)*heatmapweight)
-    weight_sum = weight_sum_neg + weight_sum_pos +1.0
+    # weight_sum_pos = mx.symbol.sum((heatmaplabel>=0.5)*heatmapweight)
+    # weight_sum_neg = mx.symbol.sum((heatmaplabel<0.5)*heatmapweight)
+    # weight_sum = weight_sum_neg + weight_sum_pos +1.0
 
     loss_heatmap = (
-                    mx.symbol.broadcast_mul( weight_sum_neg / weight_sum,heatmaplabel * mx.symbol.log(heatmap_score_concat + 1e-12)) +
-                    mx.symbol.broadcast_mul( weight_sum_pos / weight_sum,(1-heatmaplabel)*mx.symbol.log(1-heatmap_score_concat + 1e-12))
+                    heatmaplabel * mx.symbol.log(heatmap_score_concat + 1e-12) +
+                    (1-heatmaplabel)*mx.symbol.log(1-heatmap_score_concat + 1e-12)
                    )*heatmapweight * -1
 
     loss_pafmap = pafmapweight * mx.symbol.smooth_l1(data = pafmap_score_concat - partaffinityglabel,scalar=3.0)
