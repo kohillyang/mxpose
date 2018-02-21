@@ -40,11 +40,11 @@ def load_checkpoint(prefix, epoch):
 
 
 def train(retrain=True, ndata=16, gpus=[0, 1], start_n_dataset=0):
-    data_iter = getDataLoader(batch_size=BATCH_SIZE)
-    for d in data_iter:
-        for x in d:
-            print(x.shape)
-        break
+    # data_iter = getDataLoader(batch_size=BATCH_SIZE)
+    # for d in data_iter:
+    #     for x in d:
+    #         print(x.shape)
+    #     break
     input_shape = (368, 368)
     stride = (8, 8)
     sym = get_symbol(is_train=True, numberofparts=NUM_PARTS, numberoflinks=NUM_LINKS)
@@ -81,23 +81,26 @@ def train(retrain=True, ndata=16, gpus=[0, 1], start_n_dataset=0):
             self.data_iter = iter(self.data_loader)
             return self
         def __len__(self):
-            return  self.data_iter
-
-    optimizer_params = {'momentum': 0.9,
+            return  len(self.data_loader)
+    train_data_iter = TrainIter()
+    lr_scheduler = mx.lr_scheduler.FactorScheduler(step = len(train_data_iter), factor = 0.1)
+    optimizer_params = {
+                        'momentum': 0.9,
                         'wd': 0.0001,
-                        'learning_rate': 1e-5,
-                        # 'lr_scheduler': lr_scheduler,
+                        'learning_rate': 4e-6,
+                        'lr_scheduler': lr_scheduler,
                         'rescale_grad': (1.0 / batch_size),
-                        'clip_gradient': 5}
+                        'clip_gradient': 5
+                        }
 
     if retrain:
         args, auxes = load_checkpoint("pre/rcnn_coco", 0)
     else:
         args, auxes = load_checkpoint(SAVE_PREFIX + "final", start_n_dataset)
 
-    model.fit(train_data= TrainIter(),
+    model.fit(train_data= train_data_iter,
               epoch_end_callback = mx.callback.do_checkpoint(SAVE_PREFIX+"final"),
-              batch_end_callback = mx.callback.Speedometer(batch_size = batch_size,frequent=20),
+              batch_end_callback = mx.callback.Speedometer(batch_size = batch_size,frequent=100),
               eval_metric=mx.metric.Loss(),
               optimizer='sgd', optimizer_params=optimizer_params,
               arg_params=args, aux_params=auxes, begin_epoch=start_n_dataset, num_epoch=ndata,
@@ -111,19 +114,15 @@ def train(retrain=True, ndata=16, gpus=[0, 1], start_n_dataset=0):
     #     ('partaffinityglabel', (batch_size, 817152)),
     #     ('heatmapweight', (batch_size,  408576)),
     #     ('pafmapweight', (batch_size,  817152))])
-
+    #
     # summary_writer = SummaryWriter(LOGGING_DIR)
     # model.init_params(arg_params=args, aux_params=auxes, allow_missing=retrain, allow_extra=True,
     #                   initializer=mx.init.Xavier(magnitude=.2))
     #
-
-    # model.init_optimizer(optimizer='sgd',
-    #                      optimizer_params=(('learning_rate', 1e-4),
-    #                                        ('momentum',0.9),
-    #                                        ('wd',0.0001),
-    #                                        ('rescale_grad', (1.0 / batch_size)),
-    #                                        ('clip_gradient',5),
-    #                                        ))
+    #
+    # model.init_optimizer(optimizer='rmsprop',
+    #                      optimizer_params=optimizer_params
+    #                                        )
     # for n_data_wheel in range(ndata):
     #     model.save_checkpoint(SAVE_PREFIX + "final", n_data_wheel + start_n_dataset)
     #     for nbatch, data_batch in enumerate(data_iter):

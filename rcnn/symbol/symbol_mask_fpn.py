@@ -323,8 +323,14 @@ def get_resnet_fpn_rpn(numberofparts,numberoflinks):
     heatmapweight = mx.symbol.Variable(name = "heatmapweight")
     pafmapweight = mx.symbol.Variable(name = "pafmapweight")
 
-    loss_heatmap = (heatmaplabel * mx.symbol.log(heatmap_score_concat + 1e-12) + \
-                   (1-heatmaplabel)*mx.symbol.log(1-heatmap_score_concat + 1e-12))*heatmapweight * -1
+    weight_sum_pos = mx.symbol.sum((heatmaplabel>=0.5)*heatmapweight)
+    weight_sum_neg = mx.symbol.sum((heatmaplabel<0.5)*heatmapweight)
+    weight_sum = weight_sum_neg + weight_sum_pos +1.0
+
+    loss_heatmap = (
+                    mx.symbol.broadcast_mul( weight_sum_neg / weight_sum,heatmaplabel * mx.symbol.log(heatmap_score_concat + 1e-12)) +
+                    mx.symbol.broadcast_mul( weight_sum_pos / weight_sum,(1-heatmaplabel)*mx.symbol.log(1-heatmap_score_concat + 1e-12))
+                   )*heatmapweight * -1
 
     loss_pafmap = pafmapweight * mx.symbol.smooth_l1(data = pafmap_score_concat - partaffinityglabel,scalar=3.0)
 
@@ -569,7 +575,7 @@ def get_symbol(is_train = True,numberofparts=19,numberoflinks=19):
         return get_resnet_fpn_rpn(numberoflinks=numberoflinks,numberofparts=numberofparts)
     else:
         sym = get_resnet_fpn_rpn(19, 19)
-        heatmap = sym.get_internals()['sigmoid2_output']
+        heatmap = sym.get_internals()['sigmoid1_output']
         pafmap = sym.get_internals()['pafmap_score_stride8_output']
         return  mx.symbol.Group([pafmap,heatmap])
 if __name__ == "__main__":

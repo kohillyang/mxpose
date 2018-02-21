@@ -140,20 +140,24 @@ class DataIter(Dataset):
         pafmaps[np.where(pafmaps_count != 0)] /= pafmaps_count[np.where(pafmaps_count != 0)]
 
         '''
-            Generate heatmaps for stride 4(the minimum stride)
+            Generate heatmaps for stride 1(the minimum stride)
         heatmaps for other strides can be sampled by this heatmaps.
         '''
         # for stride in [64,32,16,8,4]:
-        stride = 1
         import time
         t0 = time.time()
-        dest_size = (int(self.INPUT_SIZE//stride),int(self.INPUT_SIZE//stride))
-        heatmaps = [np.zeros(shape = dest_size,dtype=np.float32) for _ in range(self.NUM_PARTS)]
-        from cheatmap.heatmaps import genGaussionHeatmap
-        for part_id,x,y in keypoints:
-            heat_tmp = genGaussionHeatmap(int(self.INPUT_SIZE),int(self.INPUT_SIZE),int(x),int(y))
-            heatmaps[part_id] = np.max([heat_tmp,heatmaps[part_id]],axis=0)
-
+        heatmaps_strides = []
+        for stride in self.STRIDES:
+            dest_size = (int(self.INPUT_SIZE//stride),int(self.INPUT_SIZE//stride))
+            heatmaps = [np.zeros(shape = dest_size,dtype=np.float32) for _ in range(self.NUM_PARTS)]
+            from cheatmap.heatmaps import genGaussionHeatmap
+            for part_id,x,y in keypoints:
+                heat_tmp = genGaussionHeatmap(int(self.INPUT_SIZE//stride),int(self.INPUT_SIZE//stride),x,y,stride=stride)
+                heatmaps[part_id] = np.max([heat_tmp,heatmaps[part_id]],axis=0)
+            heatmaps = np.array(heatmaps)
+            heatmaps = np.concatenate([heatmaps, np.min(heatmaps, axis=0)[np.newaxis]])
+            heatmaps_strides.append(heatmaps.reshape((-1)))
+        heatmap_strides = np.concatenate(heatmaps_strides,axis=0)
         # for m in range(int(self.INPUT_SIZE//stride)):
         #     for n in range(int(self.INPUT_SIZE//stride)):
         #         ori_x = n *stride + stride / 2 - 0.5
@@ -163,19 +167,17 @@ class DataIter(Dataset):
         #             sigma  = 7.0
         #             exponent = d2 / 2.0 / (sigma**2)
         #             heatmaps[pard_id][m, n] = max(np.exp(-exponent), heatmaps[pard_id][m,n])
-        heatmaps  = np.array(heatmaps)
         # print(heatmaps.shape)
-        heatmaps = np.concatenate([heatmaps,np.min(heatmaps,axis = 0)[np.newaxis]])
         # print(heatmaps.shape)
 
         pafmaps = np.array(pafmaps)
         t1 = time.time()
         # print(t1-t0)
         # print(heatmaps.shape,pafmaps.shape,loss_mask.shape)
-        return np.transpose(img_ori,(2,0,1)),self.make_fpn_label(heatmaps, pafmaps, loss_mask, )
+        return np.transpose(img_ori,(2,0,1)),[heatmap_strides]+self.make_fpn_label(pafmaps, loss_mask, )
 
 #         return  np.transpose(img_ori,(2,0,1)),heatmaps,pafmaps,np.squeeze(loss_mask)
-    def make_fpn_label(self,heatmaps,pafmaps,loss_mask):
+    def make_fpn_label(self,pafmaps,loss_mask):
         '''output shape
         46080,97280,64080,97280
         '''
@@ -183,14 +185,15 @@ class DataIter(Dataset):
         # heatmaps = cv2.resize(heatmaps,(self.INPUT_SIZE,self.INPUT_SIZE))
         # heatmaps = np.transpose(heatmaps,(2,0,1))
         strides = self.STRIDES
-        heatmaps_weight = np.repeat(np.squeeze(loss_mask)[np.newaxis],heatmaps.shape[0], axis = 0)
+        heatmaps_weight = np.repeat(np.squeeze(loss_mask)[np.newaxis],self.NUM_PARTS+1, axis = 0)
         pafmaps_weight = np.repeat(np.squeeze(loss_mask)[np.newaxis],pafmaps.shape[0], axis = 0)
 
         label_r = []
-        for img in [heatmaps,pafmaps,heatmaps_weight,pafmaps_weight]:
+        for img in [pafmaps,heatmaps_weight,pafmaps_weight]:
             one_img = []
             for stride in strides:
-                img_stridded = img[:,::int(stride),::int(stride)]
+                img_stridded = 0.5*(img[:,stride//2::int(stride),stride//2::int(stride)]+
+                                    img[:,(stride//2-1)::int(stride),(stride//2-1)::int(stride)])
                 one_img.append(img_stridded.reshape((-1)))
             label_r.append(np.concatenate(one_img,axis=0))
             # print(label_r[-1].shape)
@@ -275,7 +278,7 @@ def getDataLoader(batch_size = 16):
     r = DataLoader(test_iter, batch_size=batch_size, shuffle=True, num_workers=5, collate_fn=collate_fn, pin_memory=False,drop_last = True)
     return r
 if __name__ == '__main__':
-    print("length",len(getDataLoader(8)))
+    # print("length",len(getDataLoader(8)))
     data_iter = DataIter()
     for i in range(len(data_iter)):
         img,label = data_iter[i]

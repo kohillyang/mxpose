@@ -23,15 +23,19 @@ static int32_t min(int32_t x,int32_t y){
 void genGaussionHeatmap(
 		int32_t height,
 		int32_t width,
-		int32_t center_x,
-		int32_t center_y,
+		float center_x,
+		float center_y,
+		int32_t stride,
 		double * output){
 
-//	printf("%d %d %d %d\r\n",height,width,center_x,center_y);
-	for(int i = max(0,center_y-25);i<min(height,center_y+25);i++){
-		for(int j = max(0,center_x-25);j<min(width,center_x+25);j++){
+//	printf("%d %d %f %f\r\n",height,width,center_x,center_y);
+	for(int i = max(0,center_y/stride-25);i<min(height,center_y/stride+25);i++){
+		for(int j = max(0,center_x/stride-25);j<min(width,center_x/stride+25);j++){
+//		    printf("%d %d",i,j);
+		    double ori_x = j * stride + 1.0*stride / 2 -0.5;
+		    double ori_y = i * stride + 1.0*stride / 2 -0.5;
 			int index = i*width + j;
-			int d2 =( i-center_y)*( i-center_y) + (j - center_x)*(j - center_x);
+			double d2 =( ori_y-center_y)*( ori_y-center_y) + (ori_x - center_x)*(ori_x - center_x);
 			output[index] = exp(-1.0*d2/7/7/2);
 		}
 	}

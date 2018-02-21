@@ -11,16 +11,18 @@ module.init_params(arg_params = args,aux_params = auxes,allow_extra=True,allow_m
 for root_dir,_,names in os.walk("/home/kohill/hszc/data/coco/val2014"):
     for name in names:
         path = os.path.join(root_dir,name)
+        fig,axes = plt.subplots(1,2)
         img = cv2.imread(path)
 
         img = cv2.resize(img,(0,0),fx = 512.0/np.max(img.shape[:2]),fy = 512.0/np.max(img.shape[:2]))
-        img_padded = np.zeros(dtype=np.uint8,shape=(512,512,3))
-        img_padded[:img.shape[0],:img.shape[1],:] = img[:,:,:]
-        img_transpose = np.transpose(img_padded,(2,0,1))[np.newaxis]
+        # img_padded = np.zeros(dtype=np.uint8,shape=(512,512,3))
+        # img_padded[:img.shape[0],:img.shape[1],:] = img[:,:,:]
+        img_transpose = np.transpose(img,(2,0,1))[np.newaxis]
 
         data_batch   = mx.io.DataBatch(data = [mx.nd.array(img_transpose)])
         module.forward(data_batch)
         heatmap= module.get_outputs()[1].asnumpy()[0]
-        plt.imshow(np.max(heatmap,axis = 0))
+        axes[0].imshow(np.max(heatmap,axis = 0))
+        axes[1].imshow(img)
         # print(result.shape)
         plt.show()
