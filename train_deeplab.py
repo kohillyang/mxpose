@@ -9,16 +9,18 @@ from tensorboardX import SummaryWriter
 from data_iter import getDataLoader
 from resnet_v1_101_deeplab import get_symbol
 import mxnet as mx
-import logging,os
+import logging,os,time
 import numpy as np
 
-BATCH_SIZE = 8
+BATCH_SIZE = 4
 NUM_LINKS = 19
 NUM_PARTS =  19
 
 SAVE_PREFIX = "models/resnet-101"
 PRETRAINED_PREFIX = "pre/deeplab_cityscapes"
-LOGGING_DIR = "logs"
+LOGGING_DIR = "logs/log_deeplab_{}".format(int(time.time()))
+if not os.path.exists(LOGGING_DIR):
+    os.mkdir(LOGGING_DIR)
 def load_checkpoint(prefix, epoch):
 
     save_dict = mx.nd.load('%s-%04d.params' % (prefix, epoch))
@@ -65,8 +67,7 @@ def train(retrain = True,ndata = 16,gpus = [0,1],start_n_dataset = 0):
             label = [mx.nd.array(x) for x in data_batch[1:]]
             model.forward(mx.io.DataBatch(data = [data],label = label), is_train=True)
             predi=model.get_outputs()
-            model.backward()
-            model.update()
+
             losses_len = len(predi)
             global_step = nbatch + len(data_iter)*n_data_wheel
             print("{0} {1} {2}".format(global_step,n_data_wheel,nbatch),end = " ")
@@ -82,6 +83,8 @@ def train(retrain = True,ndata = 16,gpus = [0,1],start_n_dataset = 0):
                                           loss,
                                           global_step=global_step)
             print("")
+            model.backward()
+            model.update()
 if __name__ == "__main__":
     logging.basicConfig(level = logging.INFO)
     train(retrain = True, gpus = [0,1],start_n_dataset = 0)

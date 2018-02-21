@@ -7,7 +7,7 @@ eps = 2e-5
 use_global_stats = True
 workspace = 512
 res_deps = {'50': (3, 4, 6, 3), '101': (3, 4, 23, 3), '152': (3, 8, 36, 3), '200': (3, 24, 36, 3)}
-units = res_deps['50']
+units = res_deps['101']
 filter_list = [256, 512, 1024, 2048]
 
 def residual_unit(data, num_filter, stride, dim_match, name):
@@ -326,9 +326,9 @@ def get_resnet_fpn_rpn(numberofparts,numberoflinks):
     loss_heatmap = (heatmaplabel * mx.symbol.log(heatmap_score_concat + 1e-12) + \
                    (1-heatmaplabel)*mx.symbol.log(1-heatmap_score_concat + 1e-12))*heatmapweight * -1
 
-    loss_pafmap = pafmapweight * mx.symbol.smooth_l1(data = pafmap_score_concat - partaffinityglabel,scalar=1.0)
+    loss_pafmap = pafmapweight * mx.symbol.smooth_l1(data = pafmap_score_concat - partaffinityglabel,scalar=3.0)
 
-    return mx.symbol.Group([mx.symbol.MakeLoss(loss_heatmap),mx.symbol.MakeLoss(loss_pafmap)])
+    return mx.symbol.Group([mx.symbol.MakeLoss(loss_heatmap/414656*1000),0.*mx.symbol.MakeLoss(loss_pafmap/892152/100)])
 
 
 def get_resnet_fpn_rpn_test(num_anchors=config.NUM_ANCHORS):
@@ -565,6 +565,13 @@ def get_resnet_fpn_maskrcnn(num_classes=config.NUM_CLASSES):
     group = mx.symbol.Group(rcnn_group+mask_group)
     return group
 def get_symbol(is_train = True,numberofparts=19,numberoflinks=19):
-    return get_resnet_fpn_rpn(numberoflinks=numberoflinks,numberofparts=numberofparts)
+    if is_train:
+        return get_resnet_fpn_rpn(numberoflinks=numberoflinks,numberofparts=numberofparts)
+    else:
+        sym = get_resnet_fpn_rpn(19, 19)
+        heatmap = sym.get_internals()['sigmoid2_output']
+        pafmap = sym.get_internals()['pafmap_score_stride8_output']
+        return  mx.symbol.Group([pafmap,heatmap])
 if __name__ == "__main__":
-    mx.visualization.plot_network(get_resnet_fpn_rpn(19,19),shape = {"data":(1,3,512,512)}).view()
+    mx.visualization.plot_network(get_symbol(False,19,19),shape = {"data":(1,3,512,512)}).view()
+    # print(get_symbol(is_train=True).get_internals().list_outputs())
