@@ -106,7 +106,7 @@ class DataIter(Dataset):
                 temp[:,:,i] = img_ori
             print('gray img')
 
-        '''
+        ''' 
         Image augmentation.
         '''
         from img_aug import im_aug

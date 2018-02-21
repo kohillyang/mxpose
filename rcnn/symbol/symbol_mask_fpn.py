@@ -328,7 +328,7 @@ def get_resnet_fpn_rpn(numberofparts,numberoflinks):
 
     loss_pafmap = pafmapweight * mx.symbol.smooth_l1(data = pafmap_score_concat - partaffinityglabel,scalar=3.0)
 
-    return mx.symbol.Group([mx.symbol.MakeLoss(loss_heatmap/414656*1000),0.*mx.symbol.MakeLoss(loss_pafmap/892152/100)])
+    return mx.symbol.Group([mx.symbol.MakeLoss(loss_heatmap),0.*mx.symbol.MakeLoss(loss_pafmap/892152/100)])
 
 
 def get_resnet_fpn_rpn_test(num_anchors=config.NUM_ANCHORS):

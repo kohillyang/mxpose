@@ -7,7 +7,7 @@ config = edict()
 config.PIXEL_MEANS = np.array([103.939, 116.779, 123.68])
 config.ROIALIGN = True
 
-config.RPN_FEAT_STRIDE = [32, 16, 8]
+config.RPN_FEAT_STRIDE = [16, 8, 4]
 config.RCNN_FEAT_STRIDE = [32, 16, 8, 4]
 
 config.FIXED_PARAMS = ['conv0', 'stage1', 'gamma', 'beta']

@@ -70,14 +70,14 @@ def train(retrain = True,ndata = 16,gpus = [0,1],start_n_dataset = 0):
 
             losses_len = len(predi)
             global_step = nbatch + len(data_iter)*n_data_wheel
-            print("{0} {1} {2}".format(global_step,n_data_wheel,nbatch),end = " ")
+            print("{0} {1}/{2} {3}".format(global_step,len(data_iter),n_data_wheel,nbatch),end = " ")
             for i in range(losses_len//2):
-                loss = mx.nd.sum(predi[i]).asnumpy()[0]
+                loss = np.sum(predi[i].asnumpy())
                 summary_writer.add_scalar("heatmap_loss_{}".format(i),loss,
                                           global_step = nbatch)
                 print(loss,end = " ")
             for index,i in enumerate(range(losses_len // 2,losses_len)):
-                loss = mx.nd.sum(predi[i]).asnumpy()[0]
+                loss = np.sum(predi[i].asnumpy()).asnumpy()
                 print(loss,end = " ")
                 summary_writer.add_scalar("paf_loss_{}".format(index),
                                           loss,

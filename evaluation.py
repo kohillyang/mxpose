@@ -392,7 +392,7 @@ sym = get_symbol(is_train=False, numberofparts=19, numberoflinks=19)
 from train_deeplab import SAVE_PREFIX
 import sys
 
-_, arg_params, aux_params = mx.model.load_checkpoint(SAVE_PREFIX + "final", 13)
+_, arg_params, aux_params = mx.model.load_checkpoint(SAVE_PREFIX + "final", 1)
 
 # ground truth
 annFile = '/home/kohill/hszc/data/coco/annotations/person_keypoints_val2014.json'

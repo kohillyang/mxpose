@@ -11,7 +11,7 @@ from tensorboardX import SummaryWriter
 from data_iter_fpn import getDataLoader
 from rcnn.symbol.symbol_mask_fpn import get_symbol
 import mxnet as mx
-import logging, os
+import logging, os,time
 import numpy as np
 
 BATCH_SIZE = 8
@@ -20,7 +20,9 @@ NUM_PARTS = 19
 
 SAVE_PREFIX = "models/fpn/fpn_resnet-101"
 PRETRAINED_PREFIX = "pre/deeplab_cityscapes"
-LOGGING_DIR = "logs"
+LOGGING_DIR = "logs/log_fpn_{}".format(int(time.time()))
+if not os.path.exists(LOGGING_DIR):
+    os.mkdir(LOGGING_DIR)
 
 
 def load_checkpoint(prefix, epoch):
@@ -53,75 +55,119 @@ def train(retrain=True, ndata=16, gpus=[0, 1], start_n_dataset=0):
 
     model = mx.mod.Module(symbol=sym, context=[mx.gpu(g) for g in gpus],
                           label_names=['heatmaplabel', 'partaffinityglabel', 'heatmapweight','pafmapweight'])
-    model.bind(data_shapes=[('data', (batch_size, 3, 512, 512))], label_shapes=[
-        ('heatmaplabel', (batch_size, 102144)),
-        ('partaffinityglabel', (batch_size, 204288)),
-        ('heatmapweight', (batch_size,  102144)),
-        ('pafmapweight', (batch_size,  204288))])
 
-    summary_writer = SummaryWriter(LOGGING_DIR)
+    class TrainIter(mx.io.DataIter):
+
+        def __init__(self):
+            self.data_loader = getDataLoader(batch_size = BATCH_SIZE)
+            self.provide_data = [('data', (batch_size, 3, 512, 512))]
+            self.provide_label =[
+                                ('heatmaplabel', (batch_size, 408576)),
+                                ('partaffinityglabel', (batch_size, 817152)),
+                                ('heatmapweight', (batch_size,  408576)),
+                                ('pafmapweight', (batch_size,  817152))]
+            self.data_iter = None
+        def reset(self):
+            pass
+        def __next__(self):
+            data_batch  = next(self.data_iter)
+            data = [mx.nd.array(data_batch[0])]
+            label = [mx.nd.array(x) for x in data_batch[1:]]
+            batch = mx.io.DataBatch(data = data,label = label)
+            return batch
+        def next(self):
+            return self.__next__()
+        def __iter__(self):
+            self.data_iter = iter(self.data_loader)
+            return self
+        def __len__(self):
+            return  self.data_iter
+
+    optimizer_params = {'momentum': 0.9,
+                        'wd': 0.0001,
+                        'learning_rate': 1e-5,
+                        # 'lr_scheduler': lr_scheduler,
+                        'rescale_grad': (1.0 / batch_size),
+                        'clip_gradient': 5}
+
     if retrain:
         args, auxes = load_checkpoint("pre/rcnn_coco", 0)
     else:
         args, auxes = load_checkpoint(SAVE_PREFIX + "final", start_n_dataset)
 
-    model.init_params(arg_params=args, aux_params=auxes, allow_missing=retrain, allow_extra=True,
-                      initializer=mx.init.Xavier(magnitude=.2))
-    optimizer_params = {'momentum': 0.9,
-                        'wd': 0.0001,
-                        'learning_rate': 1e-4,
-                        # 'lr_scheduler': lr_scheduler,
-                        'rescale_grad': (1.0 / batch_size),
-                        'clip_gradient': 5}
-    model.init_optimizer(optimizer='sgd',
-                         optimizer_params=(('learning_rate', 1e-3),
-                                           ('momentum',0.9),
-                                           ('wd',0.0001),
-                                           ))
-    for n_data_wheel in range(ndata):
-        model.save_checkpoint(SAVE_PREFIX + "final", n_data_wheel + start_n_dataset)
-        for nbatch, data_batch in enumerate(data_iter):
-            # imgs_batch, heatmaps_batch, pafmaps_batch, heatmaps_weight_batch, pafmaps_weight_batch = data_batch
-            data = mx.nd.array(data_batch[0])
-            label = [mx.nd.array(x) for x in data_batch[1:]]
-            model.forward(mx.io.DataBatch(data=[data], label=label), is_train=True)
-            predi = model.get_outputs()
-            losses_len = len(predi)
-            global_step = nbatch + len(data_iter) * n_data_wheel
-            print("{0} {1} {2}".format(global_step, n_data_wheel, nbatch), end=" ")
-            for i in range(losses_len // 2):
-                loss = mx.nd.sum(predi[i]).asnumpy()[0]
-                summary_writer.add_scalar("heatmap_loss_{}".format(i), loss,
-                                          global_step=nbatch)
-                print(loss, end=" ")
-            for index, i in enumerate(range(losses_len // 2, losses_len)):
-                loss = mx.nd.sum(predi[i]).asnumpy()[0]
-                print(loss, end=" ")
-                summary_writer.add_scalar("paf_loss_{}".format(index),
-                                          loss,
-                                          global_step=global_step)
-            print("")
-            model.backward()
-            model.update()
-            model.forward(mx.io.DataBatch(data=[data], label=label), is_train=True)
-            predi = model.get_outputs()
-            losses_len = len(predi)
-            global_step = nbatch + len(data_iter) * n_data_wheel
-            print("{0} {1} {2}".format(global_step, n_data_wheel, nbatch), end=" ")
-            for i in range(losses_len // 2):
-                loss = mx.nd.sum(predi[i]).asnumpy()[0]
-                summary_writer.add_scalar("heatmap_loss_{}".format(i), loss,
-                                          global_step=nbatch)
-                print(loss, end=" ")
-            for index, i in enumerate(range(losses_len // 2, losses_len)):
-                loss = mx.nd.sum(predi[i]).asnumpy()[0]
-                print(loss, end=" ")
-                summary_writer.add_scalar("paf_loss_{}".format(index),
-                                          loss,
-                                          global_step=global_step)
-            print("")
-            model.backward()
-            model.update()
+    model.fit(train_data= TrainIter(),
+              epoch_end_callback = mx.callback.do_checkpoint(SAVE_PREFIX+"final"),
+              batch_end_callback = mx.callback.Speedometer(batch_size = batch_size,frequent=20),
+              eval_metric=mx.metric.Loss(),
+              optimizer='sgd', optimizer_params=optimizer_params,
+              arg_params=args, aux_params=auxes, begin_epoch=start_n_dataset, num_epoch=ndata,
+              allow_missing = True,
+
+              )
+
+
+    # model.bind(data_shapes=[('data', (batch_size, 3, 512, 512))], label_shapes=[
+    #     ('heatmaplabel', (batch_size, 408576)),
+    #     ('partaffinityglabel', (batch_size, 817152)),
+    #     ('heatmapweight', (batch_size,  408576)),
+    #     ('pafmapweight', (batch_size,  817152))])
+
+    # summary_writer = SummaryWriter(LOGGING_DIR)
+    # model.init_params(arg_params=args, aux_params=auxes, allow_missing=retrain, allow_extra=True,
+    #                   initializer=mx.init.Xavier(magnitude=.2))
+    #
+
+    # model.init_optimizer(optimizer='sgd',
+    #                      optimizer_params=(('learning_rate', 1e-4),
+    #                                        ('momentum',0.9),
+    #                                        ('wd',0.0001),
+    #                                        ('rescale_grad', (1.0 / batch_size)),
+    #                                        ('clip_gradient',5),
+    #                                        ))
+    # for n_data_wheel in range(ndata):
+    #     model.save_checkpoint(SAVE_PREFIX + "final", n_data_wheel + start_n_dataset)
+    #     for nbatch, data_batch in enumerate(data_iter):
+    #         # imgs_batch, heatmaps_batch, pafmaps_batch, heatmaps_weight_batch, pafmaps_weight_batch = data_batch
+    #         data = mx.nd.array(data_batch[0])
+    #         label = [mx.nd.array(x) for x in data_batch[1:]]
+    #         model.forward(mx.io.DataBatch(data=[data], label=label), is_train=True)
+    #         predi = model.get_outputs()
+    #         losses_len = len(predi)
+    #         global_step = nbatch + len(data_iter) * n_data_wheel
+    #         print("{0} {1} {2}".format(global_step, n_data_wheel, nbatch), end=" ")
+    #         for i in range(losses_len // 2):
+    #             loss = np.sum(predi[i].asnumpy())
+    #             summary_writer.add_scalar("heatmap_loss_{}".format(i), loss,
+    #                                       global_step=nbatch)
+    #             print(loss, end=" ")
+    #         for index, i in enumerate(range(losses_len // 2, losses_len)):
+    #             loss = np.sum(predi[i].asnumpy())
+    #             print(loss, end=" ")
+    #             summary_writer.add_scalar("paf_loss_{}".format(index),
+    #                                       loss,
+    #                                       global_step=global_step)
+    #         print("")
+    #         model.backward()
+    #         model.update()
+    #         # model.forward(mx.io.DataBatch(data=[data], label=label), is_train=True)
+    #         # predi = model.get_outputs()
+    #         # losses_len = len(predi)
+    #         # global_step = nbatch + len(data_iter) * n_data_wheel
+    #         # print("{0} {1} {2}".format(global_step, n_data_wheel, nbatch), end=" ")
+    #         # for i in range(losses_len // 2):
+    #         #     loss = mx.nd.sum(predi[i]).asnumpy()[0]
+    #         #     summary_writer.add_scalar("heatmap_loss_{}".format(i), loss,
+    #         #                               global_step=nbatch)
+    #         #     print(loss, end=" ")
+    #         # for index, i in enumerate(range(losses_len // 2, losses_len)):
+    #         #     loss = mx.nd.sum(predi[i]).asnumpy()[0]
+    #         #     print(loss, end=" ")
+    #         #     summary_writer.add_scalar("paf_loss_{}".format(index),
+    #         #                               loss,
+    #         #                               global_step=global_step)
+    #         # print("")
+    #         # model.backward()
+    #         # model.update()
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

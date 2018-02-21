@@ -25,7 +25,7 @@ class DataIter(Dataset):
         self.HEAT_RADIUS = 12
         self.PART_LINE_WIDTH=16
         self.INPUT_SIZE = 512
-        self.STRIDES=[8,4]
+        self.STRIDES=[16,8,4]
     def __len__(self):
         return len(self.imgIds)
     def __getitem__(self,index):
@@ -164,9 +164,9 @@ class DataIter(Dataset):
         #             exponent = d2 / 2.0 / (sigma**2)
         #             heatmaps[pard_id][m, n] = max(np.exp(-exponent), heatmaps[pard_id][m,n])
         heatmaps  = np.array(heatmaps)
-        print(heatmaps.shape)
+        # print(heatmaps.shape)
         heatmaps = np.concatenate([heatmaps,np.min(heatmaps,axis = 0)[np.newaxis]])
-        print(heatmaps.shape)
+        # print(heatmaps.shape)
 
         pafmaps = np.array(pafmaps)
         t1 = time.time()
@@ -250,45 +250,54 @@ def draw_heatmap(heatmap,img=None):
                 axes[j][i].imshow(img)
             else:
                 axes[j][i].imshow(heatmap[-1,:,:])
-
-
 def collate_fn(batch):
     imgs_batch = []
     heatmaps_batch = []
     pafmaps_batch = []
-    loss_mask_batch = []
+    heatmaps_weight_batch = []
+    pafmaps_weight_batch = []
+
     for sample in batch:
-        img_ori, heatmaps, pafmaps, loss_mask = sample
+        img_ori,[heatmaps,pafmaps,heatmaps_weight,pafmaps_weight] = sample
         imgs_batch.append(img_ori[np.newaxis])
         heatmaps_batch.append(heatmaps[np.newaxis])
         pafmaps_batch.append(pafmaps[np.newaxis])
-        loss_mask_batch.append(loss_mask[np.newaxis])
-    imgs_batch = np.concatenate(imgs_batch, axis=0)
-    heatmaps_batch = np.concatenate(heatmaps_batch, axis=0)
-    pafmaps_batch = np.concatenate(pafmaps_batch, axis=0)
-    loss_mask_batch = np.concatenate(loss_mask_batch, axis=0)
-    return [imgs_batch, heatmaps_batch, pafmaps_batch, loss_mask_batch]
-
-
-def getDataLoader(batch_size=16):
+        heatmaps_weight_batch.append(heatmaps_weight[np.newaxis])
+        pafmaps_weight_batch.append(pafmaps_weight[np.newaxis])
+    imgs_batch =np.concatenate(imgs_batch,axis = 0)
+    heatmaps_batch =np.concatenate(heatmaps_batch,axis = 0)
+    pafmaps_batch =np.concatenate(pafmaps_batch,axis = 0)
+    heatmaps_weight_batch = np.concatenate(heatmaps_weight_batch,axis = 0)
+    pafmaps_weight_batch = np.concatenate(pafmaps_weight_batch,axis = 0)
+    return [imgs_batch,heatmaps_batch,pafmaps_batch,heatmaps_weight_batch,pafmaps_weight_batch]
+def getDataLoader(batch_size = 16):
     test_iter = DataIter()
-    r = DataLoader(test_iter, batch_size=batch_size, shuffle=True, num_workers=10, collate_fn=collate_fn,
-                   pin_memory=False, drop_last=True)
+    r = DataLoader(test_iter, batch_size=batch_size, shuffle=True, num_workers=5, collate_fn=collate_fn, pin_memory=False,drop_last = True)
     return r
-
-
 if __name__ == '__main__':
-    print("length", len(getDataLoader(8)))
+    print("length",len(getDataLoader(8)))
     data_iter = DataIter()
     for i in range(len(data_iter)):
-        da = data_iter[i]
-        for d in da:
-            print(d.shape)
+        img,label = data_iter[i]
+        # for d in label:
+        #     print(d.shape)
+        heatmap = label[0]
+        heatmap_strides=[]
+        for stride in data_iter.STRIDES:
+            end = data_iter.INPUT_SIZE**2/(stride**2)*(data_iter.NUM_PARTS+1)
+            heatmap_ = heatmap[:end]
+            heatmap_ = heatmap_.reshape( (-1,data_iter.INPUT_SIZE/stride,data_iter.INPUT_SIZE/stride))
+            print(heatmap_.shape)
+            heatmap = heatmap[end:]
+            heatmap_strides.append(heatmap_)
+        # for d in x:
+        #     print(d.shape)
+        # x = heatmap_strides
+        heatmap_strides = heatmap_strides + [img]
+        x = list(map(lambda x: np.transpose(x,(1,2,0)), heatmap_strides))
 
-        x = list(map(lambda x: np.transpose(x, (1, 2, 0)) if len(x.shape) > 2 else x, da))
-
-        fig, axes = plt.subplots(2, len(x) // 2 + len(x) % 2, figsize=(45, 45),
-                                 subplot_kw={'xticks': [], 'yticks': []})
+        fig, axes = plt.subplots(2, len(x)//2 + len(x)%2+1, figsize=(45, 45),
+                             subplot_kw={'xticks': [], 'yticks': []})
         fig.subplots_adjust(hspace=0.3, wspace=0.05)
 
         count = 0
@@ -300,16 +309,15 @@ if __name__ == '__main__':
                     count += 1
                 except IndexError:
                     break
-                print(count, len(x))
-                if len(img.shape) > 2 and img.shape[2] == 38:
-                    img = np.array(
-                        [np.sqrt(img[:, :, k * 2] ** 2 + img[:, :, k * 2 + 1] ** 2) for k in range(img.shape[2] // 2)])
-                    axes[j][i].imshow(np.max(img, axis=0))
+                print(count,len(x))
+                if len(img.shape)>2 and img.shape[2]==38:
+                    img = np.array([np.sqrt(img[:,:,k *2] ** 2 + img[:,:,k *2+1 ] ** 2) for k in range(img.shape[2]//2)])
+                    axes[j][i].imshow(np.max(img,axis = 0))
                     print("limb")
-                elif len(img.shape) > 2 and img.shape[2] > 3:
-                    axes[j][i].imshow(np.max(img[:, :, :-1], axis=2))
-                elif len(img.shape) > 2 and img.shape[2] == 1:
-                    axes[j][i].imshow(img[:, :, 0])
+                elif len(img.shape)>2 and img.shape[2] > 3:
+                    axes[j][i].imshow(np.max(img[:,:,:-1],axis = 2))
+                elif len(img.shape)>2 and img.shape[2] == 1:
+                    axes[j][i].imshow(img[:,:,0])
                 else:
                     axes[j][i].imshow(img.astype(np.uint8))
 
