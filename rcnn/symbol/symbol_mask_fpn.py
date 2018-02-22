@@ -39,37 +39,37 @@ def get_resnet_conv(data):
                                no_bias=True, name="conv0", workspace=workspace)
     bn0   = mx.sym.BatchNorm(data=conv0, fix_gamma=False, eps=eps, use_global_stats=use_global_stats, name='bn0')
     relu0 = mx.sym.Activation(data=bn0, act_type='relu', name='relu0')
-    pool0 = mx.symbol.Pooling(data=relu0, kernel=(3, 3), stride=(2, 2), pad=(1, 1), pool_type='max', name='pool0')
+    # pool0 = mx.symbol.Pooling(data=relu0, kernel=(3, 3), stride=(2, 2), pad=(1, 1), pool_type='max', name='pool0')
 
     # res2
-    unit = residual_unit(data=pool0, num_filter=filter_list[0], stride=(1, 1), dim_match=False, name='stage1_unit1')
+    unit = residual_unit(data=relu0, num_filter=filter_list[0], stride=(1, 1), dim_match=False, name='stage1_unit1')
     for i in range(2, units[0] + 1):
         unit = residual_unit(data=unit, num_filter=filter_list[0], stride=(1, 1), dim_match=True,
                              name='stage1_unit%s' % i)
-    conv_C2 = unit
+    # conv_C2 = unit
 
     # res3
     unit = residual_unit(data=unit, num_filter=filter_list[1], stride=(2, 2), dim_match=False, name='stage2_unit1')
     for i in range(2, units[1] + 1):
         unit = residual_unit(data=unit, num_filter=filter_list[1], stride=(1, 1), dim_match=True,
                              name='stage2_unit%s' % i)
-    conv_C3 = unit
+    conv_C2 = unit
 
     # res4
     unit = residual_unit(data=unit, num_filter=filter_list[2], stride=(2, 2), dim_match=False, name='stage3_unit1')
     for i in range(2, units[2] + 1):
         unit = residual_unit(data=unit, num_filter=filter_list[2], stride=(1, 1), dim_match=True,
                              name='stage3_unit%s' % i)
-    conv_C4 = unit
+    conv_C3 = unit
 
     # res5
     unit = residual_unit(data=unit, num_filter=filter_list[3], stride=(2, 2), dim_match=False, name='stage4_unit1')
     for i in range(2, units[3] + 1):
         unit = residual_unit(data=unit, num_filter=filter_list[3], stride=(1, 1), dim_match=True,
                              name='stage4_unit%s' % i)
-    conv_C5 = unit
+    conv_C4 = unit
 
-    conv_feat = [conv_C5, conv_C4, conv_C3, conv_C2]
+    conv_feat = [conv_C4, conv_C3, conv_C2]
     return conv_feat
 
 def get_resnet_conv_down(conv_feat):
@@ -92,18 +92,18 @@ def get_resnet_conv_down(conv_feat):
 
     # P3 2x upsampling + C2 = P2
     P3_up   = mx.symbol.UpSampling(P3, scale=2, sample_type='nearest', workspace=512, name='P3_upsampling', num_args=1)
-    P2_la   = mx.symbol.Convolution(data=conv_feat[3], kernel=(1, 1), num_filter=256, name="P2_lateral")
-    P3_clip = mx.symbol.Crop(*[P3_up, P2_la], name="P2_clip")
-    P2      = mx.sym.ElementWiseSum(*[P3_clip, P2_la], name="P2_sum")
-    P2      = mx.symbol.Convolution(data=P2, kernel=(3, 3), pad=(1, 1), num_filter=256, name="P2_aggregate")
+    # P2_la   = mx.symbol.Convolution(data=conv_feat[3], kernel=(1, 1), num_filter=256, name="P2_lateral")
+    # P3_clip = mx.symbol.Crop(*[P3_up, P2_la], name="P2_clip")
+    # P2      = mx.sym.ElementWiseSum(*[P3_clip, P2_la], name="P2_sum")
+    # P2      = mx.symbol.Convolution(data=P2, kernel=(3, 3), pad=(1, 1), num_filter=256, name="P2_aggregate")
 
     # P6 2x subsampling P5
     P6 = mx.symbol.Pooling(data=P5, kernel=(3, 3), stride=(2, 2), pad=(1, 1), pool_type='max', name='P6_subsampling')
 
     conv_fpn_feat = dict()
-    conv_fpn_feat.update({"stride64":P6, "stride32":P5, "stride16":P4, "stride8":P3, "stride4":P2})
+    conv_fpn_feat.update({"stride32":P6, "stride16":P5, "stride8":P4, "stride4":P3})
 
-    return conv_fpn_feat, [P6, P5, P4, P3, P2]
+    return conv_fpn_feat, [P6, P5, P4, P3]
 
 def get_resnet_fpn_mask_test(num_classes=config.NUM_CLASSES, num_anchors=config.NUM_ANCHORS):
     data = mx.symbol.Variable(name="data")
@@ -330,11 +330,11 @@ def get_resnet_fpn_rpn(numberofparts,numberoflinks):
     loss_heatmap = (
                     heatmaplabel * mx.symbol.log(heatmap_score_concat + 1e-12) +
                     (1-heatmaplabel)*mx.symbol.log(1-heatmap_score_concat + 1e-12)
-                   )*heatmapweight * -1
+                   )*-1+heatmapweight-heatmapweight
 
     loss_pafmap = pafmapweight * mx.symbol.smooth_l1(data = pafmap_score_concat - partaffinityglabel,scalar=3.0)
 
-    return mx.symbol.Group([mx.symbol.MakeLoss(loss_heatmap),0.*mx.symbol.MakeLoss(loss_pafmap/892152/100)])
+    return mx.symbol.MakeLoss(loss_heatmap),0.*mx.symbol.MakeLoss(loss_pafmap/892152/100)
 
 
 def get_resnet_fpn_rpn_test(num_anchors=config.NUM_ANCHORS):
@@ -572,12 +572,15 @@ def get_resnet_fpn_maskrcnn(num_classes=config.NUM_CLASSES):
     return group
 def get_symbol(is_train = True,numberofparts=19,numberoflinks=19):
     if is_train:
-        return get_resnet_fpn_rpn(numberoflinks=numberoflinks,numberofparts=numberofparts)
+        loss_heatmap,loss_pafmap = get_resnet_fpn_rpn(numberoflinks=numberoflinks,numberofparts=numberofparts)
+        return mx.symbol.Group([loss_heatmap,loss_pafmap,mx.symbol.BlockGrad( loss_heatmap.get_internals()['sigmoid0_output'])])
     else:
         sym = get_resnet_fpn_rpn(19, 19)
-        heatmap = sym.get_internals()['sigmoid1_output']
+        heatmap_0 = sym.get_internals()['sigmoid0_output']
+        # heatmap_1 = sym.get_internals()['sigmoid1_o368utput']
+
         pafmap = sym.get_internals()['pafmap_score_stride8_output']
-        return  mx.symbol.Group([pafmap,heatmap])
+        return  mx.symbol.Group([pafmap,heatmap_0])
 if __name__ == "__main__":
-    mx.visualization.plot_network(get_symbol(False,19,19),shape = {"data":(1,3,512,512)}).view()
+    mx.visualization.plot_network(get_symbol(True,19,19),shape = {"data":(1,3,512,512)}).view()
     # print(get_symbol(is_train=True).get_internals().list_outputs())

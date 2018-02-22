@@ -8,7 +8,7 @@
 
 import mxnet as mx
 
-
+from rcnn.config import config
 class resnet_v1_101_deeplab():
     def __init__(self):
         """
@@ -728,406 +728,335 @@ class resnet_v1_101_deeplab():
         scale5c_branch2c = bn5c_branch2c
         res5c = mx.symbol.broadcast_add(name='res5c', *[res5b_relu, scale5c_branch2c])
         res5c_relu = mx.symbol.Activation(name='res5c_relu', data=res5c, act_type='relu')
-        return res5c_relu
-
-    def get_train_symbol(self, num_classes):
-        """
-        get symbol for training
-        :param num_classes: num of classes
-        :return: the symbol for training
-        """
+        return [res5c_relu,res3b3_relu]
+    def get_body(self):
         data = mx.symbol.Variable(name="data")
-
-        seg_cls_gt = mx.symbol.Variable(name='label')
-
-        # shared convolutional layers
-        conv_feat = self.get_resnet_conv(data)
-
-        # subsequent fc layers by haozhi
-        fc6_bias = mx.symbol.Variable('fc6_bias', lr_mult=2.0)
-        fc6_weight = mx.symbol.Variable('fc6_weight', lr_mult=1.0)
-
-        fc6 = mx.symbol.Convolution(data=conv_feat, kernel=(1, 1), pad=(0, 0), num_filter=1024, name="fc6",
-                                    bias=fc6_bias, weight=fc6_weight, workspace=self.workspace)
-        relu_fc6 = mx.sym.Activation(data=fc6, act_type='relu', name='relu_fc6')
-
-        score_bias = mx.symbol.Variable('score_bias', lr_mult=2.0)
-        score_weight = mx.symbol.Variable('score_weight', lr_mult=1.0)
-
-        score = mx.symbol.Convolution(data=relu_fc6, kernel=(1, 1), pad=(0, 0), num_filter=num_classes, name="score",
-                                      bias=score_bias, weight=score_weight, workspace=self.workspace)
-
-        upsampling = mx.symbol.Deconvolution(data=score, num_filter=num_classes, kernel=(32, 32), stride=(16, 16),
-                                             num_group=num_classes, no_bias=True, name='upsampling',
-                                             attr={'lr_mult': '0.0'}, workspace=self.workspace)
-
-        croped_score = mx.symbol.Crop(*[upsampling, data], offset=(8, 8), name='croped_score')
-        softmax = mx.symbol.SoftmaxOutput(data=croped_score, label=seg_cls_gt, normalization='valid', multi_output=True,
-                                          use_ignore=True, ignore_label=255, name="softmax")
-
-        return softmax
-
-    def get_test_symbol(self, num_classes):
-        """
-        get symbol for testing
-        :param num_classes: num of classes
-        :return: the symbol for testing
-        """
-        data = mx.symbol.Variable(name="data")
-
-        # shared convolutional layers
-        conv_feat = self.get_resnet_conv(data)
-
-        fc6_bias = mx.symbol.Variable('fc6_bias', lr_mult=2.0)
-        fc6_weight = mx.symbol.Variable('fc6_weight', lr_mult=1.0)
-
-        fc6 = mx.symbol.Convolution(
-            data=conv_feat, kernel=(1, 1), pad=(0, 0), num_filter=1024, name="fc6", bias=fc6_bias, weight=fc6_weight,
-            workspace=self.workspace)
-        relu_fc6 = mx.sym.Activation(data=fc6, act_type='relu', name='relu_fc6')
-
-        score_bias = mx.symbol.Variable('score_bias', lr_mult=2.0)
-        score_weight = mx.symbol.Variable('score_weight', lr_mult=1.0)
-
-        score = mx.symbol.Convolution(
-            data=relu_fc6, kernel=(1, 1), pad=(0, 0), num_filter=num_classes, name="score", bias=score_bias,
-            weight=score_weight, workspace=self.workspace)
-
-        upsampling = mx.symbol.Deconvolution(
-            data=score, num_filter=num_classes, kernel=(32, 32), stride=(16, 16), num_group=num_classes, no_bias=True,
-            name='upsampling', attr={'lr_mult': '0.0'}, workspace=self.workspace)
-
-        croped_score = mx.symbol.Crop(*[upsampling, data], offset=(8, 8), name='croped_score')
-
-        softmax = mx.symbol.SoftmaxOutput(data=croped_score, normalization='valid', multi_output=True, use_ignore=True,
-                                          ignore_label=255, name="softmax")
-
-        return softmax
-
-    def get_symbol(self, cfg, is_train=True):
-        """
-        return a generated symbol, it also need to be assigned to self.sym
-        """
-
-        # config alias for convenient
-        num_classes = cfg.dataset.NUM_CLASSES
-
-        if is_train:
-            self.sym = self.get_train_symbol(num_classes=num_classes)
-        else:
-            self.sym = self.get_test_symbol(num_classes=num_classes)
-
-        return self.sym
-
-    def init_weights(self, cfg, arg_params, aux_params):
-        arg_params['fc6_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['fc6_weight'])
-        arg_params['fc6_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['fc6_bias'])
-        arg_params['score_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['score_weight'])
-        arg_params['score_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['score_bias'])
-        arg_params['upsampling_weight'] = mx.nd.zeros(shape=self.arg_shape_dict['upsampling_weight'])
-
-        init = mx.init.Initializer()
-        init._init_bilinear('upsample_weight', arg_params['upsampling_weight'])
-
-    def get_body(self, data, numberofparts, numberoflinks):
         sym_body = self.get_resnet_conv(data)
-        r0 = mx.symbol.Convolution(data=sym_body, kernel=(3, 3),
-                                   pad=(1, 1), num_filter=numberofparts, name="conv_last_heat",
-                                   workspace=self.workspace)
-        r1 = mx.symbol.Convolution(data=sym_body, kernel=(3, 3),
-                                   pad=(1, 1), num_filter=numberoflinks * 2, name="conv_last_paf",
-                                   workspace=self.workspace)
-        conv4_3_CPM = mx.symbol.Convolution(name='conv4_3_CPM', data=sym_body, num_filter=256, pad=(1, 1),
-                                            kernel=(3, 3),
-                                            stride=(1, 1), no_bias=False)
-        relu4_3_CPM = mx.symbol.Activation(name='relu4_3_CPM', data=conv4_3_CPM, act_type='relu')
-        conv4_4_CPM = mx.symbol.Convolution(name='conv4_4_CPM', data=relu4_3_CPM, num_filter=128, pad=(1, 1),
-                                            kernel=(3, 3), stride=(1, 1), no_bias=False)
-        relu4_4_CPM = mx.symbol.Activation(name='relu4_4_CPM', data=conv4_4_CPM, act_type='relu')
-        conv5_1_CPM_L1 = mx.symbol.Convolution(name='conv5_1_CPM_L1', data=relu4_4_CPM, num_filter=128, pad=(1, 1),
-                                               kernel=(3, 3), stride=(1, 1), no_bias=False)
-        relu5_1_CPM_L1 = mx.symbol.Activation(name='relu5_1_CPM_L1', data=conv5_1_CPM_L1, act_type='relu')
-        conv5_1_CPM_L2 = mx.symbol.Convolution(name='conv5_1_CPM_L2', data=relu4_4_CPM, num_filter=128, pad=(1, 1),
-                                               kernel=(3, 3), stride=(1, 1), no_bias=False)
-        relu5_1_CPM_L2 = mx.symbol.Activation(name='relu5_1_CPM_L2', data=conv5_1_CPM_L2, act_type='relu')
-        conv5_2_CPM_L1 = mx.symbol.Convolution(name='conv5_2_CPM_L1', data=relu5_1_CPM_L1, num_filter=128, pad=(1, 1),
-                                               kernel=(3, 3), stride=(1, 1), no_bias=False)
-        relu5_2_CPM_L1 = mx.symbol.Activation(name='relu5_2_CPM_L1', data=conv5_2_CPM_L1, act_type='relu')
-        conv5_2_CPM_L2 = mx.symbol.Convolution(name='conv5_2_CPM_L2', data=relu5_1_CPM_L2, num_filter=128, pad=(1, 1),
-                                               kernel=(3, 3), stride=(1, 1), no_bias=False)
-        relu5_2_CPM_L2 = mx.symbol.Activation(name='relu5_2_CPM_L2', data=conv5_2_CPM_L2, act_type='relu')
-        conv5_3_CPM_L1 = mx.symbol.Convolution(name='conv5_3_CPM_L1', data=relu5_2_CPM_L1, num_filter=128, pad=(1, 1),
-                                               kernel=(3, 3), stride=(1, 1), no_bias=False)
-        relu5_3_CPM_L1 = mx.symbol.Activation(name='relu5_3_CPM_L1', data=conv5_3_CPM_L1, act_type='relu')
-        conv5_3_CPM_L2 = mx.symbol.Convolution(name='conv5_3_CPM_L2', data=relu5_2_CPM_L2, num_filter=128, pad=(1, 1),
-                                               kernel=(3, 3), stride=(1, 1), no_bias=False)
-        relu5_3_CPM_L2 = mx.symbol.Activation(name='relu5_3_CPM_L2', data=conv5_3_CPM_L2, act_type='relu')
-        conv5_4_CPM_L1 = mx.symbol.Convolution(name='conv5_4_CPM_L1', data=relu5_3_CPM_L1, num_filter=512, pad=(0, 0),
-                                               kernel=(1, 1), stride=(1, 1), no_bias=False)
-        relu5_4_CPM_L1 = mx.symbol.Activation(name='relu5_4_CPM_L1', data=conv5_4_CPM_L1, act_type='relu')
-        conv5_4_CPM_L2 = mx.symbol.Convolution(name='conv5_4_CPM_L2', data=relu5_3_CPM_L2, num_filter=512, pad=(0, 0),
-                                               kernel=(1, 1), stride=(1, 1), no_bias=False)
-        relu5_4_CPM_L2 = mx.symbol.Activation(name='relu5_4_CPM_L2', data=conv5_4_CPM_L2, act_type='relu')
-        conv5_5_CPM_L1 = mx.symbol.Convolution(name='conv5_5_CPM_L1', data=relu5_4_CPM_L1, num_filter=38, pad=(0, 0),
-                                               kernel=(1, 1), stride=(1, 1), no_bias=False)
-        conv5_5_CPM_L2 = mx.symbol.Convolution(name='conv5_5_CPM_L2', data=relu5_4_CPM_L2, num_filter=19, pad=(0, 0),
-                                               kernel=(1, 1), stride=(1, 1), no_bias=False)
-        concat_stage2 = mx.symbol.Concat(name='concat_stage2', *[conv5_5_CPM_L1, conv5_5_CPM_L2, relu4_4_CPM])
-        Mconv1_stage2_L1 = mx.symbol.Convolution(name='Mconv1_stage2_L1', data=concat_stage2, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu1_stage2_L1 = mx.symbol.Activation(name='Mrelu1_stage2_L1', data=Mconv1_stage2_L1, act_type='relu')
-        Mconv1_stage2_L2 = mx.symbol.Convolution(name='Mconv1_stage2_L2', data=concat_stage2, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu1_stage2_L2 = mx.symbol.Activation(name='Mrelu1_stage2_L2', data=Mconv1_stage2_L2, act_type='relu')
-        Mconv2_stage2_L1 = mx.symbol.Convolution(name='Mconv2_stage2_L1', data=Mrelu1_stage2_L1, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu2_stage2_L1 = mx.symbol.Activation(name='Mrelu2_stage2_L1', data=Mconv2_stage2_L1, act_type='relu')
-        Mconv2_stage2_L2 = mx.symbol.Convolution(name='Mconv2_stage2_L2', data=Mrelu1_stage2_L2, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu2_stage2_L2 = mx.symbol.Activation(name='Mrelu2_stage2_L2', data=Mconv2_stage2_L2, act_type='relu')
-        Mconv3_stage2_L1 = mx.symbol.Convolution(name='Mconv3_stage2_L1', data=Mrelu2_stage2_L1, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu3_stage2_L1 = mx.symbol.Activation(name='Mrelu3_stage2_L1', data=Mconv3_stage2_L1, act_type='relu')
-        Mconv3_stage2_L2 = mx.symbol.Convolution(name='Mconv3_stage2_L2', data=Mrelu2_stage2_L2, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu3_stage2_L2 = mx.symbol.Activation(name='Mrelu3_stage2_L2', data=Mconv3_stage2_L2, act_type='relu')
-        Mconv4_stage2_L1 = mx.symbol.Convolution(name='Mconv4_stage2_L1', data=Mrelu3_stage2_L1, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu4_stage2_L1 = mx.symbol.Activation(name='Mrelu4_stage2_L1', data=Mconv4_stage2_L1, act_type='relu')
-        Mconv4_stage2_L2 = mx.symbol.Convolution(name='Mconv4_stage2_L2', data=Mrelu3_stage2_L2, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu4_stage2_L2 = mx.symbol.Activation(name='Mrelu4_stage2_L2', data=Mconv4_stage2_L2, act_type='relu')
-        Mconv5_stage2_L1 = mx.symbol.Convolution(name='Mconv5_stage2_L1', data=Mrelu4_stage2_L1, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu5_stage2_L1 = mx.symbol.Activation(name='Mrelu5_stage2_L1', data=Mconv5_stage2_L1, act_type='relu')
-        Mconv5_stage2_L2 = mx.symbol.Convolution(name='Mconv5_stage2_L2', data=Mrelu4_stage2_L2, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu5_stage2_L2 = mx.symbol.Activation(name='Mrelu5_stage2_L2', data=Mconv5_stage2_L2, act_type='relu')
-        Mconv6_stage2_L1 = mx.symbol.Convolution(name='Mconv6_stage2_L1', data=Mrelu5_stage2_L1, num_filter=128,
-                                                 pad=(0, 0), kernel=(1, 1), stride=(1, 1), no_bias=False)
-        Mrelu6_stage2_L1 = mx.symbol.Activation(name='Mrelu6_stage2_L1', data=Mconv6_stage2_L1, act_type='relu')
-        Mconv6_stage2_L2 = mx.symbol.Convolution(name='Mconv6_stage2_L2', data=Mrelu5_stage2_L2, num_filter=128,
-                                                 pad=(0, 0), kernel=(1, 1), stride=(1, 1), no_bias=False)
-        Mrelu6_stage2_L2 = mx.symbol.Activation(name='Mrelu6_stage2_L2', data=Mconv6_stage2_L2, act_type='relu')
-        Mconv7_stage2_L1 = mx.symbol.Convolution(name='Mconv7_stage2_L1', data=Mrelu6_stage2_L1, num_filter=38,
-                                                 pad=(0, 0), kernel=(1, 1), stride=(1, 1), no_bias=False)
-        Mconv7_stage2_L2 = mx.symbol.Convolution(name='Mconv7_stage2_L2', data=Mrelu6_stage2_L2, num_filter=19,
-                                                 pad=(0, 0), kernel=(1, 1), stride=(1, 1), no_bias=False)
-        concat_stage3 = mx.symbol.Concat(name='concat_stage3', *[Mconv7_stage2_L1, Mconv7_stage2_L2, relu4_4_CPM])
-        Mconv1_stage3_L1 = mx.symbol.Convolution(name='Mconv1_stage3_L1', data=concat_stage3, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu1_stage3_L1 = mx.symbol.Activation(name='Mrelu1_stage3_L1', data=Mconv1_stage3_L1, act_type='relu')
-        Mconv1_stage3_L2 = mx.symbol.Convolution(name='Mconv1_stage3_L2', data=concat_stage3, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu1_stage3_L2 = mx.symbol.Activation(name='Mrelu1_stage3_L2', data=Mconv1_stage3_L2, act_type='relu')
-        Mconv2_stage3_L1 = mx.symbol.Convolution(name='Mconv2_stage3_L1', data=Mrelu1_stage3_L1, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu2_stage3_L1 = mx.symbol.Activation(name='Mrelu2_stage3_L1', data=Mconv2_stage3_L1, act_type='relu')
-        Mconv2_stage3_L2 = mx.symbol.Convolution(name='Mconv2_stage3_L2', data=Mrelu1_stage3_L2, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu2_stage3_L2 = mx.symbol.Activation(name='Mrelu2_stage3_L2', data=Mconv2_stage3_L2, act_type='relu')
-        Mconv3_stage3_L1 = mx.symbol.Convolution(name='Mconv3_stage3_L1', data=Mrelu2_stage3_L1, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu3_stage3_L1 = mx.symbol.Activation(name='Mrelu3_stage3_L1', data=Mconv3_stage3_L1, act_type='relu')
-        Mconv3_stage3_L2 = mx.symbol.Convolution(name='Mconv3_stage3_L2', data=Mrelu2_stage3_L2, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu3_stage3_L2 = mx.symbol.Activation(name='Mrelu3_stage3_L2', data=Mconv3_stage3_L2, act_type='relu')
-        Mconv4_stage3_L1 = mx.symbol.Convolution(name='Mconv4_stage3_L1', data=Mrelu3_stage3_L1, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu4_stage3_L1 = mx.symbol.Activation(name='Mrelu4_stage3_L1', data=Mconv4_stage3_L1, act_type='relu')
-        Mconv4_stage3_L2 = mx.symbol.Convolution(name='Mconv4_stage3_L2', data=Mrelu3_stage3_L2, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu4_stage3_L2 = mx.symbol.Activation(name='Mrelu4_stage3_L2', data=Mconv4_stage3_L2, act_type='relu')
-        Mconv5_stage3_L1 = mx.symbol.Convolution(name='Mconv5_stage3_L1', data=Mrelu4_stage3_L1, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu5_stage3_L1 = mx.symbol.Activation(name='Mrelu5_stage3_L1', data=Mconv5_stage3_L1, act_type='relu')
-        Mconv5_stage3_L2 = mx.symbol.Convolution(name='Mconv5_stage3_L2', data=Mrelu4_stage3_L2, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu5_stage3_L2 = mx.symbol.Activation(name='Mrelu5_stage3_L2', data=Mconv5_stage3_L2, act_type='relu')
-        Mconv6_stage3_L1 = mx.symbol.Convolution(name='Mconv6_stage3_L1', data=Mrelu5_stage3_L1, num_filter=128,
-                                                 pad=(0, 0), kernel=(1, 1), stride=(1, 1), no_bias=False)
-        Mrelu6_stage3_L1 = mx.symbol.Activation(name='Mrelu6_stage3_L1', data=Mconv6_stage3_L1, act_type='relu')
-        Mconv6_stage3_L2 = mx.symbol.Convolution(name='Mconv6_stage3_L2', data=Mrelu5_stage3_L2, num_filter=128,
-                                                 pad=(0, 0), kernel=(1, 1), stride=(1, 1), no_bias=False)
-        Mrelu6_stage3_L2 = mx.symbol.Activation(name='Mrelu6_stage3_L2', data=Mconv6_stage3_L2, act_type='relu')
-        Mconv7_stage3_L1 = mx.symbol.Convolution(name='Mconv7_stage3_L1', data=Mrelu6_stage3_L1, num_filter=38,
-                                                 pad=(0, 0), kernel=(1, 1), stride=(1, 1), no_bias=False)
-        Mconv7_stage3_L2 = mx.symbol.Convolution(name='Mconv7_stage3_L2', data=Mrelu6_stage3_L2, num_filter=19,
-                                                 pad=(0, 0), kernel=(1, 1), stride=(1, 1), no_bias=False)
-        concat_stage4 = mx.symbol.Concat(name='concat_stage4', *[Mconv7_stage3_L1, Mconv7_stage3_L2, relu4_4_CPM])
-        Mconv1_stage4_L1 = mx.symbol.Convolution(name='Mconv1_stage4_L1', data=concat_stage4, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu1_stage4_L1 = mx.symbol.Activation(name='Mrelu1_stage4_L1', data=Mconv1_stage4_L1, act_type='relu')
-        Mconv1_stage4_L2 = mx.symbol.Convolution(name='Mconv1_stage4_L2', data=concat_stage4, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu1_stage4_L2 = mx.symbol.Activation(name='Mrelu1_stage4_L2', data=Mconv1_stage4_L2, act_type='relu')
-        Mconv2_stage4_L1 = mx.symbol.Convolution(name='Mconv2_stage4_L1', data=Mrelu1_stage4_L1, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu2_stage4_L1 = mx.symbol.Activation(name='Mrelu2_stage4_L1', data=Mconv2_stage4_L1, act_type='relu')
-        Mconv2_stage4_L2 = mx.symbol.Convolution(name='Mconv2_stage4_L2', data=Mrelu1_stage4_L2, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu2_stage4_L2 = mx.symbol.Activation(name='Mrelu2_stage4_L2', data=Mconv2_stage4_L2, act_type='relu')
-        Mconv3_stage4_L1 = mx.symbol.Convolution(name='Mconv3_stage4_L1', data=Mrelu2_stage4_L1, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu3_stage4_L1 = mx.symbol.Activation(name='Mrelu3_stage4_L1', data=Mconv3_stage4_L1, act_type='relu')
-        Mconv3_stage4_L2 = mx.symbol.Convolution(name='Mconv3_stage4_L2', data=Mrelu2_stage4_L2, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu3_stage4_L2 = mx.symbol.Activation(name='Mrelu3_stage4_L2', data=Mconv3_stage4_L2, act_type='relu')
-        Mconv4_stage4_L1 = mx.symbol.Convolution(name='Mconv4_stage4_L1', data=Mrelu3_stage4_L1, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu4_stage4_L1 = mx.symbol.Activation(name='Mrelu4_stage4_L1', data=Mconv4_stage4_L1, act_type='relu')
-        Mconv4_stage4_L2 = mx.symbol.Convolution(name='Mconv4_stage4_L2', data=Mrelu3_stage4_L2, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu4_stage4_L2 = mx.symbol.Activation(name='Mrelu4_stage4_L2', data=Mconv4_stage4_L2, act_type='relu')
-        Mconv5_stage4_L1 = mx.symbol.Convolution(name='Mconv5_stage4_L1', data=Mrelu4_stage4_L1, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu5_stage4_L1 = mx.symbol.Activation(name='Mrelu5_stage4_L1', data=Mconv5_stage4_L1, act_type='relu')
-        Mconv5_stage4_L2 = mx.symbol.Convolution(name='Mconv5_stage4_L2', data=Mrelu4_stage4_L2, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu5_stage4_L2 = mx.symbol.Activation(name='Mrelu5_stage4_L2', data=Mconv5_stage4_L2, act_type='relu')
-        Mconv6_stage4_L1 = mx.symbol.Convolution(name='Mconv6_stage4_L1', data=Mrelu5_stage4_L1, num_filter=128,
-                                                 pad=(0, 0), kernel=(1, 1), stride=(1, 1), no_bias=False)
-        Mrelu6_stage4_L1 = mx.symbol.Activation(name='Mrelu6_stage4_L1', data=Mconv6_stage4_L1, act_type='relu')
-        Mconv6_stage4_L2 = mx.symbol.Convolution(name='Mconv6_stage4_L2', data=Mrelu5_stage4_L2, num_filter=128,
-                                                 pad=(0, 0), kernel=(1, 1), stride=(1, 1), no_bias=False)
-        Mrelu6_stage4_L2 = mx.symbol.Activation(name='Mrelu6_stage4_L2', data=Mconv6_stage4_L2, act_type='relu')
-        Mconv7_stage4_L1 = mx.symbol.Convolution(name='Mconv7_stage4_L1', data=Mrelu6_stage4_L1, num_filter=38,
-                                                 pad=(0, 0), kernel=(1, 1), stride=(1, 1), no_bias=False)
-        Mconv7_stage4_L2 = mx.symbol.Convolution(name='Mconv7_stage4_L2', data=Mrelu6_stage4_L2, num_filter=19,
-                                                 pad=(0, 0), kernel=(1, 1), stride=(1, 1), no_bias=False)
-        concat_stage5 = mx.symbol.Concat(name='concat_stage5', *[Mconv7_stage4_L1, Mconv7_stage4_L2, relu4_4_CPM])
-        Mconv1_stage5_L1 = mx.symbol.Convolution(name='Mconv1_stage5_L1', data=concat_stage5, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu1_stage5_L1 = mx.symbol.Activation(name='Mrelu1_stage5_L1', data=Mconv1_stage5_L1, act_type='relu')
-        Mconv1_stage5_L2 = mx.symbol.Convolution(name='Mconv1_stage5_L2', data=concat_stage5, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu1_stage5_L2 = mx.symbol.Activation(name='Mrelu1_stage5_L2', data=Mconv1_stage5_L2, act_type='relu')
-        Mconv2_stage5_L1 = mx.symbol.Convolution(name='Mconv2_stage5_L1', data=Mrelu1_stage5_L1, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu2_stage5_L1 = mx.symbol.Activation(name='Mrelu2_stage5_L1', data=Mconv2_stage5_L1, act_type='relu')
-        Mconv2_stage5_L2 = mx.symbol.Convolution(name='Mconv2_stage5_L2', data=Mrelu1_stage5_L2, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu2_stage5_L2 = mx.symbol.Activation(name='Mrelu2_stage5_L2', data=Mconv2_stage5_L2, act_type='relu')
-        Mconv3_stage5_L1 = mx.symbol.Convolution(name='Mconv3_stage5_L1', data=Mrelu2_stage5_L1, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu3_stage5_L1 = mx.symbol.Activation(name='Mrelu3_stage5_L1', data=Mconv3_stage5_L1, act_type='relu')
-        Mconv3_stage5_L2 = mx.symbol.Convolution(name='Mconv3_stage5_L2', data=Mrelu2_stage5_L2, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu3_stage5_L2 = mx.symbol.Activation(name='Mrelu3_stage5_L2', data=Mconv3_stage5_L2, act_type='relu')
-        Mconv4_stage5_L1 = mx.symbol.Convolution(name='Mconv4_stage5_L1', data=Mrelu3_stage5_L1, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu4_stage5_L1 = mx.symbol.Activation(name='Mrelu4_stage5_L1', data=Mconv4_stage5_L1, act_type='relu')
-        Mconv4_stage5_L2 = mx.symbol.Convolution(name='Mconv4_stage5_L2', data=Mrelu3_stage5_L2, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu4_stage5_L2 = mx.symbol.Activation(name='Mrelu4_stage5_L2', data=Mconv4_stage5_L2, act_type='relu')
-        Mconv5_stage5_L1 = mx.symbol.Convolution(name='Mconv5_stage5_L1', data=Mrelu4_stage5_L1, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu5_stage5_L1 = mx.symbol.Activation(name='Mrelu5_stage5_L1', data=Mconv5_stage5_L1, act_type='relu')
-        Mconv5_stage5_L2 = mx.symbol.Convolution(name='Mconv5_stage5_L2', data=Mrelu4_stage5_L2, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu5_stage5_L2 = mx.symbol.Activation(name='Mrelu5_stage5_L2', data=Mconv5_stage5_L2, act_type='relu')
-        Mconv6_stage5_L1 = mx.symbol.Convolution(name='Mconv6_stage5_L1', data=Mrelu5_stage5_L1, num_filter=128,
-                                                 pad=(0, 0), kernel=(1, 1), stride=(1, 1), no_bias=False)
-        Mrelu6_stage5_L1 = mx.symbol.Activation(name='Mrelu6_stage5_L1', data=Mconv6_stage5_L1, act_type='relu')
-        Mconv6_stage5_L2 = mx.symbol.Convolution(name='Mconv6_stage5_L2', data=Mrelu5_stage5_L2, num_filter=128,
-                                                 pad=(0, 0), kernel=(1, 1), stride=(1, 1), no_bias=False)
-        Mrelu6_stage5_L2 = mx.symbol.Activation(name='Mrelu6_stage5_L2', data=Mconv6_stage5_L2, act_type='relu')
-        Mconv7_stage5_L1 = mx.symbol.Convolution(name='Mconv7_stage5_L1', data=Mrelu6_stage5_L1, num_filter=38,
-                                                 pad=(0, 0), kernel=(1, 1), stride=(1, 1), no_bias=False)
-        Mconv7_stage5_L2 = mx.symbol.Convolution(name='Mconv7_stage5_L2', data=Mrelu6_stage5_L2, num_filter=19,
-                                                 pad=(0, 0), kernel=(1, 1), stride=(1, 1), no_bias=False)
-        concat_stage6 = mx.symbol.Concat(name='concat_stage6', *[Mconv7_stage5_L1, Mconv7_stage5_L2, relu4_4_CPM])
-        Mconv1_stage6_L1 = mx.symbol.Convolution(name='Mconv1_stage6_L1', data=concat_stage6, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu1_stage6_L1 = mx.symbol.Activation(name='Mrelu1_stage6_L1', data=Mconv1_stage6_L1, act_type='relu')
-        Mconv1_stage6_L2 = mx.symbol.Convolution(name='Mconv1_stage6_L2', data=concat_stage6, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu1_stage6_L2 = mx.symbol.Activation(name='Mrelu1_stage6_L2', data=Mconv1_stage6_L2, act_type='relu')
-        Mconv2_stage6_L1 = mx.symbol.Convolution(name='Mconv2_stage6_L1', data=Mrelu1_stage6_L1, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu2_stage6_L1 = mx.symbol.Activation(name='Mrelu2_stage6_L1', data=Mconv2_stage6_L1, act_type='relu')
-        Mconv2_stage6_L2 = mx.symbol.Convolution(name='Mconv2_stage6_L2', data=Mrelu1_stage6_L2, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu2_stage6_L2 = mx.symbol.Activation(name='Mrelu2_stage6_L2', data=Mconv2_stage6_L2, act_type='relu')
-        Mconv3_stage6_L1 = mx.symbol.Convolution(name='Mconv3_stage6_L1', data=Mrelu2_stage6_L1, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu3_stage6_L1 = mx.symbol.Activation(name='Mrelu3_stage6_L1', data=Mconv3_stage6_L1, act_type='relu')
-        Mconv3_stage6_L2 = mx.symbol.Convolution(name='Mconv3_stage6_L2', data=Mrelu2_stage6_L2, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu3_stage6_L2 = mx.symbol.Activation(name='Mrelu3_stage6_L2', data=Mconv3_stage6_L2, act_type='relu')
-        Mconv4_stage6_L1 = mx.symbol.Convolution(name='Mconv4_stage6_L1', data=Mrelu3_stage6_L1, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu4_stage6_L1 = mx.symbol.Activation(name='Mrelu4_stage6_L1', data=Mconv4_stage6_L1, act_type='relu')
-        Mconv4_stage6_L2 = mx.symbol.Convolution(name='Mconv4_stage6_L2', data=Mrelu3_stage6_L2, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu4_stage6_L2 = mx.symbol.Activation(name='Mrelu4_stage6_L2', data=Mconv4_stage6_L2, act_type='relu')
-        Mconv5_stage6_L1 = mx.symbol.Convolution(name='Mconv5_stage6_L1', data=Mrelu4_stage6_L1, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu5_stage6_L1 = mx.symbol.Activation(name='Mrelu5_stage6_L1', data=Mconv5_stage6_L1, act_type='relu')
-        Mconv5_stage6_L2 = mx.symbol.Convolution(name='Mconv5_stage6_L2', data=Mrelu4_stage6_L2, num_filter=128,
-                                                 pad=(3, 3), kernel=(7, 7), stride=(1, 1), no_bias=False)
-        Mrelu5_stage6_L2 = mx.symbol.Activation(name='Mrelu5_stage6_L2', data=Mconv5_stage6_L2, act_type='relu')
-        Mconv6_stage6_L1 = mx.symbol.Convolution(name='Mconv6_stage6_L1', data=Mrelu5_stage6_L1, num_filter=128,
-                                                 pad=(0, 0), kernel=(1, 1), stride=(1, 1), no_bias=False)
-        Mrelu6_stage6_L1 = mx.symbol.Activation(name='Mrelu6_stage6_L1', data=Mconv6_stage6_L1, act_type='relu')
-        Mconv6_stage6_L2 = mx.symbol.Convolution(name='Mconv6_stage6_L2', data=Mrelu5_stage6_L2, num_filter=128,
-                                                 pad=(0, 0), kernel=(1, 1), stride=(1, 1), no_bias=False)
-        Mrelu6_stage6_L2 = mx.symbol.Activation(name='Mrelu6_stage6_L2', data=Mconv6_stage6_L2, act_type='relu')
-        Mconv7_stage6_L1 = mx.symbol.Convolution(name='Mconv7_stage6_L1', data=Mrelu6_stage6_L1, num_filter=38,
-                                                 pad=(0, 0), kernel=(1, 1), stride=(1, 1), no_bias=False)
-        Mconv7_stage6_L2 = mx.symbol.Convolution(name='Mconv7_stage6_L2', data=Mrelu6_stage6_L2, num_filter=19,
-                                                 pad=(0, 0), kernel=(1, 1), stride=(1, 1), no_bias=False)
 
-        # return conv5_5_CPM_L2
-
-        heatmaps_predicts = [r0, conv5_5_CPM_L2, Mconv7_stage2_L2, Mconv7_stage3_L2, Mconv7_stage4_L2,
-                             Mconv7_stage5_L2, Mconv7_stage6_L2]
-        pafmaps_predicts = [r1, conv5_5_CPM_L1, Mconv7_stage2_L1, Mconv7_stage3_L1, Mconv7_stage4_L1,
-                            Mconv7_stage5_L1, Mconv7_stage6_L1]
-        heatmaps_predicts = [r0]
-        pafmaps_predicts = [r1]
-        return heatmaps_predicts, pafmaps_predicts
+        return sym_body
 
 
-def slice_label(sym, numberofparts, numberoflinks):
-    slice_symbol = lambda s, e: mx.symbol.slice_axis(sym, axis=1, begin=s, end=s + e if e is not None else None)
-    slice_start = 0
-    heatmap = slice_symbol(slice_start, numberofparts)
-    slice_start += numberofparts
-    partaffinity = slice_symbol(slice_start, numberoflinks * 2)
-    slice_start += numberoflinks * 2
-    heatweight = slice_symbol(slice_start, numberofparts)
-    slice_start += numberofparts
-    vecweight = slice_symbol(slice_start, None)
 
-    return heatmap, partaffinity, heatweight, vecweight
+def get_resnet_conv_down(conv_feat):
+    # C5 to P5, 1x1 dimension reduction to 256
+    P5 = mx.symbol.Convolution(data=conv_feat[0], kernel=(1, 1), num_filter=256, name="P5_lateral")
+
+    # P5 2x upsampling + C4 = P4
+    P5_up   = mx.symbol.UpSampling(P5, scale=2, sample_type='nearest', workspace=512, name='P5_upsampling', num_args=1)
+    P4_la   = mx.symbol.Convolution(data=conv_feat[1], kernel=(1, 1), num_filter=256, name="P4_lateral")
+    P5_clip = mx.symbol.Crop(*[P5_up, P4_la], name="P4_clip")
+    P4      = mx.sym.ElementWiseSum(*[P5_clip, P4_la], name="P4_sum")
+    P4      = mx.symbol.Convolution(data=P4, kernel=(3, 3), pad=(1, 1), num_filter=256, name="P4_aggregate")
+
+    # P4 2x upsampling + C3 = P3
+    # P4_up   = mx.symbol.UpSampling(P4, scale=2, sample_type='nearest', workspace=512, name='P4_upsampling', num_args=1)
+    # P3_la   = mx.symbol.Convolution(data=conv_feat[2], kernel=(1, 1), num_filter=256, name="P3_lateral")
+    # P4_clip = mx.symbol.Crop(*[P4_up, P3_la], name="P3_clip")
+    # P3      = mx.sym.ElementWiseSum(*[P4_clip, P3_la], name="P3_sum")
+    # P3      = mx.symbol.Convolution(data=P3, kernel=(3, 3), pad=(1, 1), num_filter=256, name="P3_aggregate")
+
+    # P3 2x upsampling + C2 = P2
+    # P3_up   = mx.symbol.UpSampling(P3, scale=2, sample_type='nearest', workspace=512, name='P3_upsampling', num_args=1)
+    # P2_la   = mx.symbol.Convolution(data=conv_feat[3], kernel=(1, 1), num_filter=256, name="P2_lateral")
+    # P3_clip = mx.symbol.Crop(*[P3_up, P2_la], name="P2_clip")
+    # P2      = mx.sym.ElementWiseSum(*[P3_clip, P2_la], name="P2_sum")
+    # P2      = mx.symbol.Convolution(data=P2, kernel=(3, 3), pad=(1, 1), num_filter=256, name="P2_aggregate")
+
+    # P6 2x subsampling P5
+    # P6 = mx.symbol.Pooling(data=P5, kernel=(3, 3), stride=(2, 2), pad=(1, 1), pool_type='max', name='P6_subsampling')
+
+    conv_fpn_feat = dict()
+    conv_fpn_feat.update({"stride8":P5, "stride4":P4})
+
+    return conv_fpn_feat, [P5, P4]
 
 
-def get_symbol(is_train=True, numberofparts=19, numberoflinks=19):
+def get_resnet_fpn_rpn(numberofparts,numberoflinks):
     data = mx.symbol.Variable(name="data")
-    label = mx.symbol.Variable(name="label")
-    # heatmap, partaffinity, heatweight, vecweight = slice_label(label, numberofparts, numberoflinks)
-    heatmap = mx.symbol.Variable(name = "heatmaplabel")
-    partaffinity = mx.symbol.Variable(name = "partaffinityglabel")
-    loss_mask = mx.symbol.Variable(name = "loss_mask")
+    rpn_label = mx.symbol.Variable(name='label')
+
+    # shared convolutional layers, bottom up
+    # conv_feat = get_resnet_conv(data)
     Sym = resnet_v1_101_deeplab()
-    heat_ps, paf_ps = Sym.get_body(data, numberofparts, numberoflinks)
-    losses = []
+    conv_feat = Sym.get_body()
+    # shared convolutional layers, top down
+    conv_fpn_feat, _ = get_resnet_conv_down(conv_feat)
+
+    losses_heatmap=[]
+    for stride in config.RPN_FEAT_STRIDE:
+        heatmap_conv = mx.symbol.Convolution(data=conv_fpn_feat['stride%s'%stride],
+                                         kernel=(3, 3), pad=(1, 1),
+                                         num_filter=512)
+        heatmap_relu = mx.symbol.Activation(data=heatmap_conv, act_type="relu")
+        heatmap_score = mx.symbol.Convolution(data=heatmap_relu,
+                                              kernel=(1, 1), pad=(0, 0),
+                                              num_filter=numberofparts,
+                                              name="heatmap_score_stride%s" % stride)
+        heatmap_score = mx.symbol.sigmoid(heatmap_score)
+
+        heatmaplabel = mx.symbol.Variable("heatmaplabel_stride{}".format(stride))
+        heatmapweight = mx.symbol.Variable("heatmapweight_stride{}".format(stride))
+        loss_heatmap = (
+                        heatmaplabel * mx.symbol.log(heatmap_score + 1e-12) +
+                        (1-heatmaplabel)*mx.symbol.log(1-heatmap_score + 1e-12)
+                       )*-1+heatmapweight-heatmapweight
+        losses_heatmap.append(mx.symbol.MakeLoss(loss_heatmap))
+
+    return mx.sym.Group(losses_heatmap)
+
+
+def get_resnet_fpn_rpn_test(num_anchors=config.NUM_ANCHORS):
+    data = mx.symbol.Variable(name="data")
+    im_info = mx.symbol.Variable(name="im_info")
+
+    # shared convolutional layers
+    conv_feat = get_resnet_conv(data)
+    conv_fpn_feat, _ = get_resnet_conv_down(conv_feat)
+
+    # # shared parameters for predictions
+    rpn_conv_weight      = mx.symbol.Variable('rpn_conv_weight')
+    rpn_conv_bias        = mx.symbol.Variable('rpn_conv_bias')
+    rpn_conv_cls_weight  = mx.symbol.Variable('rpn_conv_cls_weight')
+    rpn_conv_cls_bias    = mx.symbol.Variable('rpn_conv_cls_bias')
+    rpn_conv_bbox_weight = mx.symbol.Variable('rpn_conv_bbox_weight')
+    rpn_conv_bbox_bias   = mx.symbol.Variable('rpn_conv_bbox_bias')
+
+    rpn_cls_prob_dict = {}
+    rpn_bbox_pred_dict = {}
+    for stride in config.RPN_FEAT_STRIDE:
+        rpn_conv = mx.symbol.Convolution(data=conv_fpn_feat['stride%s'%stride],
+                                         kernel=(3, 3), pad=(1, 1),
+                                         num_filter=512,
+                                         weight=rpn_conv_weight,
+                                         bias=rpn_conv_bias)
+        rpn_relu = mx.symbol.Activation(data=rpn_conv, act_type="relu", name="rpn_relu")
+        rpn_cls_score = mx.symbol.Convolution(data=rpn_relu,
+                                              kernel=(1, 1), pad=(0, 0),
+                                              num_filter=2 * num_anchors,
+                                              weight=rpn_conv_cls_weight,
+                                              bias=rpn_conv_cls_bias,
+                                              name="rpn_cls_score_stride%s" % stride)
+        rpn_bbox_pred = mx.symbol.Convolution(data=rpn_relu,
+                                              kernel=(1, 1), pad=(0, 0),
+                                              num_filter=4 * num_anchors,
+                                              weight=rpn_conv_bbox_weight,
+                                              bias=rpn_conv_bbox_bias,
+                                              name="rpn_bbox_pred_stride%s" % stride)
+
+        # ROI Proposal
+        rpn_cls_score_reshape = mx.symbol.Reshape(data=rpn_cls_score,
+                                                  shape=(0, 2, -1, 0),
+                                                  name="rpn_cls_score_reshape")
+        rpn_cls_prob = mx.symbol.SoftmaxActivation(data=rpn_cls_score_reshape,
+                                                   mode="channel",
+                                                   name="rpn_cls_prob_stride%s" % stride)
+        rpn_cls_prob_reshape = mx.symbol.Reshape(data=rpn_cls_prob,
+                                                 shape=(0, 2 * num_anchors, -1, 0),
+                                                 name='rpn_cls_prob_reshape')
+
+        rpn_cls_prob_dict.update({'cls_prob_stride%s' % stride: rpn_cls_prob_reshape})
+        rpn_bbox_pred_dict.update({'bbox_pred_stride%s' % stride: rpn_bbox_pred})
+    args_dict = dict(rpn_cls_prob_dict.items()+rpn_bbox_pred_dict.items())
+    aux_dict = {'im_info':im_info,'name':'rois',
+                'op_type':'proposal_fpn','output_score':True,
+                'feat_stride':config.RPN_FEAT_STRIDE,'scales':tuple(config.ANCHOR_SCALES),
+                'ratios':tuple(config.ANCHOR_RATIOS),
+                'rpn_pre_nms_top_n':config.TEST.PROPOSAL_PRE_NMS_TOP_N,
+                'rpn_post_nms_top_n':config.TEST.PROPOSAL_POST_NMS_TOP_N,
+                'rpn_min_size':config.TEST.RPN_MIN_SIZE,
+                'threshold':config.TEST.RPN_NMS_THRESH}
+    # Proposal
+    group = mx.symbol.Custom(**dict(args_dict.items()+aux_dict.items()))
+
+    # rois = group[0]
+    # score = group[1]
+    return group
+
+
+def get_resnet_fpn_maskrcnn(num_classes=config.NUM_CLASSES):
+    rcnn_feat_stride = config.RCNN_FEAT_STRIDE
+    data = mx.symbol.Variable(name="data")
+    rois = dict()
+    label = dict()
+    bbox_target = dict()
+    bbox_weight = dict()
+    mask_target = dict()
+    mask_weight = dict()
+    for s in rcnn_feat_stride:
+        rois['rois_stride%s' % s] = mx.symbol.Variable(name='rois_stride%s' % s)
+        label['label_stride%s' % s] = mx.symbol.Variable(name='label_stride%s' % s)
+        bbox_target['bbox_target_stride%s' % s] = mx.symbol.Variable(name='bbox_target_stride%s' % s)
+        bbox_weight['bbox_weight_stride%s' % s] = mx.symbol.Variable(name='bbox_weight_stride%s' % s)
+        mask_target['mask_target_stride%s' % s] = mx.symbol.Variable(name='mask_target_stride%s' % s)
+        mask_weight['mask_weight_stride%s' % s] = mx.symbol.Variable(name='mask_weight_stride%s' % s)
+
+    # reshape input
+    for s in rcnn_feat_stride:
+        rois['rois_stride%s' % s] = mx.symbol.Reshape(data=rois['rois_stride%s' % s],
+                                                      shape=(-1, 5),
+                                                      name='rois_stride%s_reshape' % s)
+
+        label['label_stride%s' % s] = mx.symbol.Reshape(data=label['label_stride%s' % s], shape=(-1,), name='label_stride%s_reshape'%s)
+        bbox_target['bbox_target_stride%s' % s] = mx.symbol.Reshape(data=bbox_target['bbox_target_stride%s' % s],
+                                                                    shape=(-1, 4 * num_classes),
+                                                                    name='bbox_target_stride%s_reshape'%s)
+        bbox_weight['bbox_weight_stride%s' % s] = mx.symbol.Reshape(data=bbox_weight['bbox_weight_stride%s' % s],
+                                                                    shape=(-1, 4 * num_classes),
+                                                                    name='bbox_weight_stride%s_reshape'%s)
+        mask_target['mask_target_stride%s' % s] = mx.symbol.Reshape(data=mask_target['mask_target_stride%s' % s],
+                                                                    shape=(-1, num_classes, 28, 28),
+                                                                    name='mask_target_stride%s_reshape'%s)
+        mask_weight['mask_weight_stride%s' % s] = mx.symbol.Reshape(data=mask_weight['mask_weight_stride%s' % s],
+                                                                    shape=(-1, num_classes, 1, 1),
+                                                                    name='mask_weight_stride%s_reshape'%s)
+
+    label_list = []
+    bbox_target_list = []
+    bbox_weight_list = []
+    mask_target_list = []
+    mask_weight_list = []
+    for s in rcnn_feat_stride:
+        label_list.append(label['label_stride%s' % s])
+        bbox_target_list.append(bbox_target['bbox_target_stride%s' % s])
+        bbox_weight_list.append(bbox_weight['bbox_weight_stride%s' % s])
+        mask_target_list.append(mask_target['mask_target_stride%s' % s])
+        mask_weight_list.append(mask_weight['mask_weight_stride%s' % s])
+
+    label = mx.symbol.concat(*label_list, dim=0)
+    bbox_target = mx.symbol.concat(*bbox_target_list, dim=0)
+    bbox_weight = mx.symbol.concat(*bbox_weight_list, dim=0)
+    mask_target = mx.symbol.concat(*mask_target_list, dim=0)
+    mask_weight = mx.symbol.concat(*mask_weight_list, dim=0)
+
+    # shared convolutional layers, bottom up
+    conv_feat = get_resnet_conv(data)
+
+    # shared convolutional layers, top down
+    conv_fpn_feat, _ = get_resnet_conv_down(conv_feat)
+
+    # shared parameters for predictions
+    rcnn_fc6_weight     = mx.symbol.Variable('rcnn_fc6_weight')
+    rcnn_fc6_bias       = mx.symbol.Variable('rcnn_fc6_bias')
+    rcnn_fc7_weight     = mx.symbol.Variable('rcnn_fc7_weight')
+    rcnn_fc7_bias       = mx.symbol.Variable('rcnn_fc7_bias')
+    rcnn_fc_cls_weight  = mx.symbol.Variable('rcnn_fc_cls_weight')
+    rcnn_fc_cls_bias    = mx.symbol.Variable('rcnn_fc_cls_bias')
+    rcnn_fc_bbox_weight = mx.symbol.Variable('rcnn_fc_bbox_weight')
+    rcnn_fc_bbox_bias   = mx.symbol.Variable('rcnn_fc_bbox_bias')
+
+    mask_conv_1_weight = mx.symbol.Variable('mask_conv_1_weight')
+    mask_conv_1_bias   = mx.symbol.Variable('mask_conv_1_bias')
+    mask_conv_2_weight = mx.symbol.Variable('mask_conv_2_weight')
+    mask_conv_2_bias   = mx.symbol.Variable('mask_conv_2_bias')
+    mask_conv_3_weight = mx.symbol.Variable('mask_conv_3_weight')
+    mask_conv_3_bias   = mx.symbol.Variable('mask_conv_3_bias')
+    mask_conv_4_weight = mx.symbol.Variable('mask_conv_4_weight')
+    mask_conv_4_bias   = mx.symbol.Variable('mask_conv_4_bias')
+    mask_deconv_1_weight = mx.symbol.Variable('mask_deconv_1_weight')
+    mask_deconv_2_weight = mx.symbol.Variable('mask_deconv_2_weight')
+    mask_deconv_2_bias = mx.symbol.Variable('mask_deconv_2_bias')
+
+    rcnn_cls_score_list = []
+    rcnn_bbox_pred_list = []
+    mask_deconv_act_list = []
+    for stride in rcnn_feat_stride:
+        if config.ROIALIGN:
+            roi_pool = mx.symbol.ROIAlign(
+                name='roi_pool', data=conv_fpn_feat['stride%s'%stride], rois=rois['rois_stride%s' % stride],
+                pooled_size=(14, 14),
+                spatial_scale=1.0 / stride)
+        else:
+            roi_pool = mx.symbol.ROIPooling(
+                name='roi_pool', data=conv_fpn_feat['stride%s'%stride], rois=rois['rois_stride%s' % stride],
+                pooled_size=(14, 14),
+                spatial_scale=1.0 / stride)
+
+        # classification with fc layers
+        flatten = mx.symbol.Flatten(data=roi_pool, name="flatten")
+        fc6     = mx.symbol.FullyConnected(data=flatten, num_hidden=1024, weight=rcnn_fc6_weight, bias=rcnn_fc6_bias)
+        relu6   = mx.symbol.Activation(data=fc6, act_type="relu", name="relu6")
+        drop6   = mx.symbol.Dropout(data=relu6, p=0.5, name="drop6")
+        fc7     = mx.symbol.FullyConnected(data=drop6, num_hidden=1024, weight=rcnn_fc7_weight, bias=rcnn_fc7_bias)
+        relu7   = mx.symbol.Activation(data=fc7, act_type="relu", name="relu7")
+
+        # classification
+        cls_score = mx.symbol.FullyConnected(data=relu7, weight=rcnn_fc_cls_weight, bias=rcnn_fc_cls_bias,
+                                             num_hidden=num_classes)
+        # bounding box regression
+        bbox_pred = mx.symbol.FullyConnected(data=relu7, weight=rcnn_fc_bbox_weight, bias=rcnn_fc_bbox_bias,
+                                             num_hidden=num_classes * 4)
+        rcnn_cls_score_list.append(cls_score)
+        rcnn_bbox_pred_list.append(bbox_pred)
+
+        # MASK
+        mask_conv_1 = mx.symbol.Convolution(
+            data=roi_pool, kernel=(3, 3), pad=(1, 1), num_filter=256, workspace=512, weight=mask_conv_1_weight, bias=mask_conv_1_bias,
+            name="mask_conv_1")
+        mask_relu_1 = mx.symbol.Activation(data=mask_conv_1, act_type="relu", name="mask_relu_1")
+        mask_conv_2 = mx.symbol.Convolution(
+            data=mask_relu_1, kernel=(3, 3), pad=(1, 1), num_filter=256, workspace=512, weight=mask_conv_2_weight, bias=mask_conv_2_bias,
+            name="mask_conv_2")
+        mask_relu_2 = mx.symbol.Activation(data=mask_conv_2, act_type="relu", name="mask_relu_2")
+        mask_conv_3 = mx.symbol.Convolution(
+            data=mask_relu_2, kernel=(3, 3), pad=(1, 1), num_filter=256, workspace=512, weight=mask_conv_3_weight, bias=mask_conv_3_bias,
+            name="mask_conv_3")
+        mask_relu_3 = mx.symbol.Activation(data=mask_conv_3, act_type="relu", name="mask_relu_3")
+        mask_conv_4 = mx.symbol.Convolution(
+            data=mask_relu_3, kernel=(3, 3), pad=(1, 1), num_filter=256, workspace=512, weight=mask_conv_4_weight, bias=mask_conv_4_bias,
+            name="mask_conv_4")
+        mask_relu_4 = mx.symbol.Activation(data=mask_conv_4, act_type="relu", name="mask_relu_4")
+        mask_deconv_1 = mx.symbol.Deconvolution(data=mask_relu_4, kernel=(4, 4), stride=(2, 2), num_filter=256, pad=(1, 1),
+                                                workspace=512, weight=mask_deconv_1_weight, name="mask_deconv1")
+        mask_deconv_2 = mx.symbol.Convolution(data=mask_deconv_1, kernel=(1, 1), num_filter=num_classes,
+                                              workspace=512, weight=mask_deconv_2_weight, bias=mask_deconv_2_bias, name="mask_deconv2")
+        mask_deconv_act_list.append(mask_deconv_2)
+
+    # concat output of each level
+    cls_score_concat = mx.symbol.concat(*rcnn_cls_score_list, dim=0)  # [num_rois_4level, num_class]
+    bbox_pred_concat = mx.symbol.concat(*rcnn_bbox_pred_list, dim=0)  # [num_rois_4level, num_class*4]
+
+    # loss
+    cls_prob = mx.symbol.SoftmaxOutput(data=cls_score_concat,
+                                           label=label,
+                                           multi_output=True,
+                                           normalization='valid', use_ignore=True, ignore_label=-1,
+                                           name='rcnn_cls_prob')
+    bbox_loss_ = bbox_weight * mx.symbol.smooth_l1(name='rcnn_bbox_loss_', scalar=1.0,
+                                                   data=(bbox_pred_concat - bbox_target))
+
+    bbox_loss = mx.sym.MakeLoss(name='bbox_loss', data=bbox_loss_, grad_scale=1.0 / config.TRAIN.BATCH_ROIS)
+    rcnn_group = [cls_prob, bbox_loss]
+    for ind, name, last_shape in zip(range(len(rcnn_group)), ['cls_prob', 'bbox_loss'], [num_classes, num_classes * 4]):
+        rcnn_group[ind] = mx.symbol.Reshape(data=rcnn_group[ind], shape=(config.TRAIN.BATCH_IMAGES, -1, last_shape),
+                                            name=name + '_reshape')
+
+    mask_act_concat = mx.symbol.concat(*mask_deconv_act_list, dim=0)
+    mask_prob = mx.symbol.Activation(data=mask_act_concat, act_type='sigmoid', name="mask_prob")
+    mask_output = mx.symbol.Custom(mask_prob=mask_prob, mask_target=mask_target, mask_weight=mask_weight,
+                                   label=label, name="mask_output", op_type='MaskOutput')
+    mask_group = [mask_output]
+    # group output
+    group = mx.symbol.Group(rcnn_group+mask_group)
+    return group
+def get_symbol(is_train = True,numberofparts=19,numberoflinks=19):
     if is_train:
-        for heat_p, paf_p in zip(heat_ps, paf_ps):
-            heat_p = mx.sym.sigmoid(heat_p)
-            loss1 = mx.symbol.broadcast_mul ((heatmap * mx.symbol.log(heat_p + 1e-12) + (1 - heatmap) * mx.symbol.log(
-                1 - heat_p + 1e-12)) , loss_mask)
-            loss2 = mx.sym.broadcast_mul(((paf_p - partaffinity) ** 2) , loss_mask)
-            loss1 = mx.sym.sum(-1 * loss1) / (numberofparts * 46 * 46)
-            loss2 = mx.sym.sum(loss2 / (numberoflinks * 46 * 46 * 2))
-            losses.append(loss1)
-            losses.append(loss2)
-        # return mx.symbol.Group([mx.symbol.MakeLoss(loss1),mx.symbol.MakeLoss(loss2),mx.symbol.BlockGrad(heat_p),mx.symbol.BlockGrad(paf_p)])
-        return mx.sym.Group([mx.sym.MakeLoss(x) for x in losses])
+        loss_heatmap = get_resnet_fpn_rpn(numberoflinks=numberoflinks,numberofparts=numberofparts)
+        return mx.symbol.Group([loss_heatmap,
+                                mx.symbol.BlockGrad(loss_heatmap.get_internals()['sigmoid0_output']),
+                                mx.symbol.BlockGrad(loss_heatmap.get_internals()['sigmoid1_output']),
+                                ])
     else:
-        return mx.symbol.Group([mx.sym.sigmoid(x) for x in heat_ps] + paf_ps)
+        sym = get_resnet_fpn_rpn(19, 19)
+        heatmap_0 = sym.get_internals()['sigmoid0_output']
+        heatmap_1 = sym.get_internals()['sigmoid1_output']
 
+        # heatmap_1 = sym.get_internals()['sigmoid1_o368utput']
 
+        pafmap = sym.get_internals()['pafmap_score_stride8_output']
+        return  mx.symbol.Group([pafmap,heatmap_0])
 if __name__ == "__main__":
-    mx.visualization.plot_network(get_symbol(is_train=True)).view()
+    mx.visualization.plot_network(get_symbol(True,19,19),shape = {"data":(1,3,368,368)}).view()
+    # print(get_symbol(is_train=True).get_internals().list_outputs())
+
+# if __name__ == "__main__":
+#     mx.visualization.plot_network(get_symbol(is_train=True),shape = {"data":(1,3,512,512)}).view()

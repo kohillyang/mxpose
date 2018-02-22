@@ -7,7 +7,7 @@ _,args,auxes = mx.model.load_checkpoint(SAVE_PREFIX+"final",1)
 module = mx.mod.Module(symbol = get_symbol(is_train=False),data_names=['data'],label_names=[])
 module.bind(data_shapes=[('data',(1,3,512,512))])
 # mx.visualization.plot_network(get_symbol(is_train=True)).view()
-module.init_params(arg_params = args,aux_params = auxes,allow_extra=True,allow_missing=True)
+module.init_params(arg_params = args,aux_params = auxes,allow_extra=True,allow_missing=False)
 for root_dir,_,names in os.walk("/home/kohill/hszc/data/coco/val2014"):
     for name in names:
         path = os.path.join(root_dir,name)

@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import cv2,os,random
 from matplotlib.patches import Polygon
 from pycocotools import mask as maskUtils
+from rcnn.config import config
 class DataIter(Dataset):
     def __init__(self):
         annFile = '/home/kohill/hszc/data/coco/annotations/person_keypoints_train2014.json' # keypoint file
@@ -24,8 +25,9 @@ class DataIter(Dataset):
         self.NUM_LINKS=19
         self.HEAT_RADIUS = 12
         self.PART_LINE_WIDTH=16
-        self.INPUT_SIZE = 512
-        self.STRIDES=[16,8,4]
+        self.INPUT_SIZE = 368
+
+        self.STRIDES=config.RPN_FEAT_STRIDE
     def __len__(self):
         return len(self.imgIds)
     def __getitem__(self,index):
@@ -275,7 +277,7 @@ def collate_fn(batch):
     return [imgs_batch,heatmaps_batch,pafmaps_batch,heatmaps_weight_batch,pafmaps_weight_batch]
 def getDataLoader(batch_size = 16):
     test_iter = DataIter()
-    r = DataLoader(test_iter, batch_size=batch_size, shuffle=True, num_workers=5, collate_fn=collate_fn, pin_memory=False,drop_last = True)
+    r = DataLoader(test_iter, batch_size=batch_size, shuffle=True, num_workers=10, collate_fn=collate_fn, pin_memory=False,drop_last = True)
     return r
 if __name__ == '__main__':
     # print("length",len(getDataLoader(8)))
@@ -285,6 +287,7 @@ if __name__ == '__main__':
         # for d in label:
         #     print(d.shape)
         heatmap = label[0]
+        loss_mask = label[-2]
         heatmap_strides=[]
         for stride in data_iter.STRIDES:
             end = data_iter.INPUT_SIZE**2/(stride**2)*(data_iter.NUM_PARTS+1)
@@ -293,10 +296,19 @@ if __name__ == '__main__':
             print(heatmap_.shape)
             heatmap = heatmap[end:]
             heatmap_strides.append(heatmap_)
+        loss_mask_strides=[]
+        for stride in data_iter.STRIDES:
+            end = data_iter.INPUT_SIZE**2/(stride**2)*(data_iter.NUM_PARTS+1)
+            loss_mask_ = loss_mask[:end]
+            loss_mask_ = loss_mask_.reshape( (-1,data_iter.INPUT_SIZE/stride,data_iter.INPUT_SIZE/stride))
+            print(loss_mask_.shape)
+            loss_mask = loss_mask[end:]
+            loss_mask_strides.append(loss_mask_)
+
         # for d in x:
         #     print(d.shape)
         # x = heatmap_strides
-        heatmap_strides = heatmap_strides + [img]
+        heatmap_strides = heatmap_strides + [img] + loss_mask_strides
         x = list(map(lambda x: np.transpose(x,(1,2,0)), heatmap_strides))
 
         fig, axes = plt.subplots(2, len(x)//2 + len(x)%2+1, figsize=(45, 45),
