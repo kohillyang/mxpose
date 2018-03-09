@@ -13,8 +13,8 @@ from matplotlib.patches import Polygon
 from pycocotools import mask as maskUtils
 class DataIter(Dataset):
     def __init__(self):
-        annFile = '/home/kohill/hszc/data/coco/annotations/person_keypoints_train2014.json' # keypoint file
-        self.trainimagepath = '/home/kohill/hszc/data/coco/train2014'             # train image path        
+        annFile = '/data1/yks/dataset/openpose_dataset/dataset/annotations/person_keypoints_train2014.json' # keypoint file
+        self.trainimagepath = '/data1/yks/dataset/openpose_dataset/dataset/train2014/'             # train image path        
         coco = COCO(annFile)
         catIds = coco.getCatIds(catNms=['person']);
         self.catIds = coco.getCatIds(catNms=['person'])
@@ -106,6 +106,7 @@ class DataIter(Dataset):
 
 
         from img_aug import im_aug
+        img_ori = img_ori[:,:,(2,1,0)]
         [img_ori,loss_mask],keypoints,parts = im_aug([img_ori,loss_mask],keypoints,parts)
         # for pard_id,x,y in keypoints:
         #     cv2.circle(heatmaps[pard_id],
@@ -256,7 +257,8 @@ def collate_fn(batch):
     return [imgs_batch,heatmaps_batch,pafmaps_batch,loss_mask_batch]    
 def getDataLoader(batch_size = 16):
     test_iter = DataIter()
-    r = DataLoader(test_iter, batch_size=batch_size, shuffle=True, num_workers=5, collate_fn=collate_fn, pin_memory=False,drop_last = True)
+    print(len(test_iter))
+    r = DataLoader(test_iter, batch_size=batch_size, shuffle=True, num_workers=8, collate_fn=collate_fn, pin_memory=False,drop_last = True)
     return r
 if __name__ == '__main__':
     print("length",len(getDataLoader(8)))

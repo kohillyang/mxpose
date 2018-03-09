@@ -1,5 +1,4 @@
-'''
-@author: kohill
+''' @author: kohill
 
 '''
 from __future__ import print_function
@@ -12,7 +11,7 @@ import mxnet as mx
 import logging,os
 import numpy as np
 
-BATCH_SIZE = 8
+BATCH_SIZE = 12
 NUM_LINKS = 19
 NUM_PARTS =  19
 
@@ -33,7 +32,7 @@ def load_checkpoint(prefix, epoch):
             aux_params[name] = v
     return arg_params, aux_params
 
-def train(retrain = True,ndata = 16,gpus = [0,1],start_n_dataset = 0):
+def train(retrain = True,ndata = 64,gpus = [1,2,3],start_n_dataset = 0):
     input_shape = (368,368)
     stride = (8,8)
     sym = get_symbol(is_train = True, numberofparts = NUM_PARTS, numberoflinks= NUM_LINKS)
@@ -84,4 +83,4 @@ def train(retrain = True,ndata = 16,gpus = [0,1],start_n_dataset = 0):
             print("")
 if __name__ == "__main__":
     logging.basicConfig(level = logging.INFO)
-    train(retrain = True, gpus = [0,1],start_n_dataset = 0)
+    train(retrain = True, gpus = [1,2,3],start_n_dataset = 0)

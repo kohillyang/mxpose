@@ -392,10 +392,10 @@ sym = get_symbol(is_train=False, numberofparts=19, numberoflinks=19)
 from train_deeplab import SAVE_PREFIX
 import sys
 
-_, arg_params, aux_params = mx.model.load_checkpoint(SAVE_PREFIX + "final", 13)
+_, arg_params, aux_params = mx.model.load_checkpoint(SAVE_PREFIX + "final", 17)
 
 # ground truth
-annFile = '/home/kohill/hszc/data/coco/annotations/person_keypoints_val2014.json'
+annFile = '/data1/yks/dataset/openpose_dataset/dataset/annotations/person_keypoints_val2014.json'
 cocoGt = COCO(annFile)
 cats = cocoGt.loadCats(cocoGt.getCatIds())
 catIds = cocoGt.getCatIds(catNms=['person'])
@@ -455,7 +455,7 @@ notworkingimageIds = []
 for i in range(imgIds_num):
     print 'image: ', i
     img = cocoGt.loadImgs(imgIds[i])[0]
-    cimg = io.imread('/home/kohill/hszc/data/coco/val2014/' + img['file_name'])
+    cimg = io.imread('/data1/yks/dataset/openpose_dataset/dataset/val2014/' + img['file_name'])
 
     if len(cimg.shape) == 2:
         cimgRGB = np.zeros((cimg.shape[0], cimg.shape[1], 3))
