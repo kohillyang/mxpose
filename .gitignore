@@ -10,3 +10,11 @@ models/
 *.params
 
 *.json
+
+\.cproject
+
+\.settings/
+
+*.so
+
+*.o

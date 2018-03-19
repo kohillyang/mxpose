@@ -7,10 +7,19 @@ from __future__ import print_function
 from torch.utils.data import Dataset, DataLoader
 from pycocotools.coco import COCO
 import numpy as np
+
+import numpy as np
+
+
+
+
+
+
 import matplotlib.pyplot as plt
 import cv2,os,random
 from matplotlib.patches import Polygon
 from pycocotools import mask as maskUtils
+from heatpaf.heatpaf import genPafs
 class DataIter(Dataset):
     def __init__(self):
         annFile = '/data1/yks/dataset/openpose_dataset/dataset/annotations/person_keypoints_train2014.json' # keypoint file
@@ -145,27 +154,28 @@ class DataIter(Dataset):
         #              (int(round(x1)),int(round(y1))),(1,1,1),self.PART_LINE_WIDTH)
         #     pafmaps[limb_id *2] = np.squeeze( mask_[::int(stride),::int(stride)]) * vec[0]
         #     pafmaps[limb_id *2 + 1] = np.squeeze( mask_[::int(stride),::int(stride)]) * vec[1]
-        pafmaps  = [np.zeros_like(np.squeeze(loss_mask)) for _ in range(self.NUM_LINKS * 2)]
-        pafmaps_count = [np.zeros_like(np.squeeze(loss_mask)) for _ in range(self.NUM_LINKS * 2)]
+#         pafmaps  = [np.zeros_like(np.squeeze(loss_mask)) for _ in range(self.NUM_LINKS * 2)]
+#         pafmaps_count = [np.zeros_like(np.squeeze(loss_mask)) for _ in range(self.NUM_LINKS * 2)]
+            
+        pafmaps = genPafs(loss_mask.shape[0],loss_mask.shape[1],parts)
+#         for limb_id,x0,y0,x1,y1 in parts:
+#             p0 = np.array([x0,y0])
+#             p1 = np.array([x1,y1])
+#             mask_ = np.zeros_like(np.squeeze(loss_mask),dtype = np.uint8)
+#             cv2.line(mask_,(int(round(x0)),int(round(y0))),
+#                      (int(round(x1)),int(round(y1))),(1,1,1),self.PART_LINE_WIDTH)
+#             vec = p1 -p0
+#             vec =  vec/(np.linalg.norm(vec)+0.001)
+#             vec_index = np.where(np.squeeze(mask_) )
+#             pafmaps[2*limb_id][vec_index] += vec[0]
+#             pafmaps[2*limb_id + 1][vec_index] += vec[1]
+#             pafmaps_count[2*limb_id][vec_index] += 1
+#             pafmaps_count[2*limb_id+1][vec_index] += 1
 
-        for limb_id,x0,y0,x1,y1 in parts:
-            p0 = np.array([x0,y0])
-            p1 = np.array([x1,y1])
-            mask_ = np.zeros_like(np.squeeze(loss_mask),dtype = np.uint8)
-            cv2.line(mask_,(int(round(x0)),int(round(y0))),
-                     (int(round(x1)),int(round(y1))),(1,1,1),self.PART_LINE_WIDTH)
-            vec = p1 -p0
-            vec =  vec/(np.linalg.norm(vec)+0.001)
-            vec_index = np.where(np.squeeze(mask_) )
-            pafmaps[2*limb_id][vec_index] += vec[0]
-            pafmaps[2*limb_id + 1][vec_index] += vec[1]
-            pafmaps_count[2*limb_id][vec_index] += 1
-            pafmaps_count[2*limb_id+1][vec_index] += 1
-
-        pafmaps_count = np.array(pafmaps_count)
+#         pafmaps_count = np.array(pafmaps_count)
         pafmaps = np.array(pafmaps)
-        pafmaps[np.where(pafmaps_count!=0)] /= pafmaps_count[np.where(pafmaps_count!=0)]
-        pafmaps = pafmaps[:,::int(stride),::int(stride)]
+#         pafmaps[np.where(pafmaps_count!=0)] /= pafmaps_count[np.where(pafmaps_count!=0)]
+#         pafmaps = pafmaps[:,::int(stride),::int(stride)]
         heatmaps = np.array(heatmaps)
         heatmaps = np.concatenate([heatmaps,np.min(heatmaps,axis=0)[np.newaxis]])
         dest_size = (46,46)
@@ -270,8 +280,7 @@ if __name__ == '__main__':
 
         x = list(map(lambda x: np.transpose(x,(1,2,0)) if len(x.shape) > 2 else x, da))
         
-        fig, axes = plt.subplots(2, len(x)//2 + len(x)%2, figsize=(45, 45),
-                             subplot_kw={'xticks': [], 'yticks': []})
+        fig, axes = plt.subplots(2, len(x)//2 + len(x)%2, figsize=(8, 8))
         fig.subplots_adjust(hspace=0.3, wspace=0.05) 
  
         count = 0
@@ -285,8 +294,9 @@ if __name__ == '__main__':
                     break
                 print(count,len(x))
                 if len(img.shape)>2 and img.shape[2]==38:
-                    img = np.array([np.sqrt(img[:,:,k *2] ** 2 + img[:,:,k *2+1 ] ** 2) for k in range(img.shape[2]//2)])
-                    axes[j][i].imshow(np.max(img,axis = 0))
+#                     img = np.array([np.sqrt(img[:,:,k *2] ** 2 + img[:,:,k *2+1 ] ** 2) for k in range(img.shape[2]//2)])
+#                     axes[j][i].imshow(np.max(img,axis = 0))
+                    axes[j][i].imshow(img[:,:,0])
                     print("limb")
                 elif len(img.shape)>2 and img.shape[2] > 3:
                     axes[j][i].imshow(np.max(img[:,:,:-1],axis = 2)) 
